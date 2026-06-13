@@ -10,8 +10,10 @@
 #   wallet-service       8002 -> 8000
 #   transaction-service  8003 -> 8000
 #   fraud-service        8004 -> 8000   (internal; called by transaction-service)
+#   notification-service (no port; background worker, consumes from rabbitmq)
 #   postgres             5432 -> 5432
 #   redis                6379 -> 6379
+#   rabbitmq             5672 -> 5672   (AMQP), 15672 -> 15672 (management UI)
 
 services:
   postgres:
@@ -39,6 +41,24 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
+      retries: 10
+
+  # Message broker. The transaction-service publishes "transfer completed"
+  # events here; the notification-service consumes them. The default `guest`
+  # user can only connect from localhost, so we set explicit credentials that
+  # work across the Docker network.
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5672:5672"    # AMQP (the protocol the services speak)
+      - "15672:15672"  # management UI — open http://localhost:15672 in a browser
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-securepay}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-securepay_dev_password}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
       retries: 10
 
   # One-shot: applies database migrations (alembic upgrade head) then exits.
@@ -117,6 +137,7 @@ services:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
       FRAUD_SERVICE_URL: http://fraud-service:8000
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-securepay}:${RABBITMQ_PASSWORD:-securepay_dev_password}@rabbitmq:5672/
     depends_on:
       postgres:
         condition: service_healthy
@@ -124,6 +145,8 @@ services:
         condition: service_completed_successfully
       fraud-service:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
 
   fraud-service:
     build:
@@ -138,6 +161,24 @@ services:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
+
+  # Background worker (no HTTP port). Consumes "transaction.completed" events
+  # from rabbitmq and writes a notification row per party. It needs the database
+  # (to read wallets/users and write notifications) and the broker (to consume).
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-securepay}:${RABBITMQ_PASSWORD:-securepay_dev_password}@rabbitmq:5672/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
 
 volumes:
   postgres_data:

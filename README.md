@@ -1,7 +1,7 @@
 # SecurePay — Digital Wallet (MVP)
 
 A microservices digital wallet built with **FastAPI**, **PostgreSQL**, **Redis**,
-and **Docker Compose**. This repo is the first runnable slice of the larger
+**RabbitMQ**, and **Docker Compose**. This repo is the first runnable slice of the larger
 [architecture design](../SecurePay_Architecture_v1.md): users can register, log
 in, fund a wallet, and send money to each other.
 
@@ -19,9 +19,11 @@ in, fund a wallet, and send money to each other.
 | **wallet-service** | 8002 | Create wallet, check balance, mock deposit, statement. |
 | **transaction-service** | 8003 | Atomic peer-to-peer transfers. Calls the fraud service before moving money. |
 | **fraud-service** | 8004 | Rule-based, real-time fraud screening. Scores each transfer and can block it. |
+| **notification-service** | — | Background worker. Consumes "transfer completed" events from RabbitMQ and records a notification per party. |
 | **migrator** | — | One-shot: runs the Alembic database migrations at startup, then exits. |
 | **postgres** | 5432 | The single shared database. |
 | **redis** | 6379 | Backs the gateway's rate limiter. |
+| **rabbitmq** | 5672 / 15672 | Message broker. Carries transfer events to the notification-service. 15672 is the management UI. |
 
 You normally only call **port 8000** (the gateway). The other ports are exposed
 so you can poke individual services directly while learning. The **fraud-service
@@ -29,8 +31,8 @@ is internal** — it's called service-to-service by the transaction-service and 
 deliberately *not* routed through the public gateway. Port 8004 is exposed only
 so you can read its fraud logs while learning.
 
-Not in this pass yet (next steps): merchant/bill payments, RabbitMQ
-notifications, and the React frontend.
+Not in this pass yet (next steps): merchant/bill payments and the React
+frontend.
 
 ---
 
@@ -176,8 +178,13 @@ changes). Handy read-only commands (run them the same `docker compose run` way):
 client ──> api-gateway (8000) ──┬──> user-service          ┐
         rate limit + routing    ├──> wallet-service        ├──> postgres (shared DB)
                                 └──> transaction-service ──┤
-                                          │               │
-                                          └──> fraud-service (internal, 8004)
+                                          │   │           │
+                                          │   └──> fraud-service (internal, 8004)
+                                          │
+                                          └─ publishes "transaction.completed"
+                                                   │
+                                              rabbitmq (broker) ──> notification-service
+                                                                       (writes notifications)
                                   redis (rate limiter)
 ```
 
@@ -185,6 +192,14 @@ The fraud-service sits *behind* the transaction-service, not behind the gateway:
 a client never calls it directly. Before a transfer commits, the
 transaction-service asks the fraud-service "is this transfer suspicious?" and
 acts on the answer.
+
+After a transfer commits, the transaction-service *publishes an event* to
+RabbitMQ and returns immediately — it does not wait for anyone to react. The
+notification-service consumes those events on its own schedule. This is the
+opposite of the fraud call: fraud screening is **synchronous** (the transfer
+waits for the answer because it changes the outcome), while notifications are
+**asynchronous** (the money has already moved, so they must never slow down or
+fail the payment).
 
 A few design choices worth understanding:
 
@@ -299,28 +314,113 @@ FROM fraud_logs ORDER BY created_at DESC;
 
 ---
 
+## Notifications (RabbitMQ, async events)
+
+When a transfer completes, both people should be told ("you sent $X", "you
+received $X"). We *could* write those notifications inline at the end of the
+transfer, but that would couple a payment to a side effect: if the email step
+were slow or broke, it would slow down or fail a payment that already succeeded.
+Instead we use a **message broker** (RabbitMQ) to do the work **asynchronously**.
+
+### The flow
+
+```
+transaction-service                rabbitmq                 notification-service
+   │  (transfer already committed)
+   │
+   ├─ publish "transaction.completed" ──> [ securepay.events ] ──> [ notifications ]
+   │   {tx_id, sender, recipient, amount}     topic exchange          durable queue
+   │                                                                       │
+   └─ return 201 to the client immediately            consume, write a notification
+       (does NOT wait for the notification)            row per party, log "email -> …"
+```
+
+1. **Publish.** After the money moves and the database commit succeeds, the
+   transaction-service calls
+   [`publish_event("transaction.completed", …)`](shared/events.py). This is
+   **fire-and-forget**: if the broker is momentarily down, it logs the failure
+   and moves on — it must *never* reverse or fail a transfer that already
+   happened. (A system needing an at-least-once guarantee would use a
+   *transactional outbox*; that's a deliberate later step.)
+2. **Route.** The event goes to a **topic exchange** named `securepay.events`
+   with a routing key like `transaction.completed`. A topic exchange routes by a
+   dotted key, so new consumers can subscribe to patterns (the
+   notification-service binds `transaction.*`) without the producer changing.
+3. **Consume.** The [notification-service](services/notification-service/app/main.py)
+   is a **background worker** — not an HTTP server (no port, no uvicorn). It
+   blocks in `start_consuming()`, and for each event writes one row per party to
+   the `notifications` table (the audit trail a real email/SMS sender would
+   update) and logs `email -> alice@example.com: You sent $250.00.`
+
+### Why a separate process / queue at all?
+
+- **Decoupling.** The transaction-service doesn't know or care who reacts to a
+  transfer. You could add an SMS service, an analytics consumer, or a fraud
+  back-test later — each just binds its own queue to the same exchange. The
+  producer never changes.
+- **Resilience.** The queue is **durable** and messages are **persisted to disk**
+  (`delivery_mode=2`), and the consumer **acks** a message only after it's
+  handled. So if the notification-service is down when a transfer happens, the
+  event waits in the queue and is delivered when it comes back — notifications
+  aren't lost.
+- **Poison messages.** If a message can't be parsed/handled, the consumer
+  `nack`s it **without** requeueing, so one bad message can't loop forever.
+- **Independent scaling.** If notification volume grew, you'd run more
+  notification-service replicas pulling from the same queue — without touching
+  the payment path. `basic_qos(prefetch_count=10)` hands each worker a few
+  messages at a time rather than the whole backlog.
+
+> **Gotcha worth knowing:** RabbitMQ's built-in `guest` user can only connect
+> from *localhost*. Across the Docker network that fails, so we set an explicit
+> `RABBITMQ_USER` / `RABBITMQ_PASSWORD` (see `.env.example`) that both the broker
+> and the services use.
+
+### Try it
+
+With the stack running, make any transfer (the smoke test does), then watch the
+worker react and inspect the rows it wrote:
+
+```bash
+python3 scripts/smoke_test.py                       # makes a transfer
+docker compose logs notification-service | grep 'email ->'
+```
+
+```sql
+-- in psql
+SELECT user_id, channel, destination, message, transaction_id, status
+FROM notifications ORDER BY id;
+```
+
+You can also open the **RabbitMQ management UI** at http://localhost:15672
+(log in with the `RABBITMQ_USER` / `RABBITMQ_PASSWORD` from your `.env`) to watch
+the `securepay.events` exchange and the `notifications` queue in real time.
+
+---
+
 ## Project layout
 
 ```
 securepay/
-├── docker-compose.yml        # defines all 8 containers + healthchecks
+├── docker-compose.yml        # defines all 10 containers + healthchecks
 ├── requirements.txt          # shared Python deps for every service
-├── .env.example              # copy to .env (passwords, JWT secret)
+├── .env.example              # copy to .env (passwords, JWT + RabbitMQ creds)
 ├── alembic.ini               # Alembic config (schema migrations)
 ├── migrations/               # the ordered migration history
 │   ├── env.py                # wires Alembic to the models + DATABASE_URL
-│   └── versions/             # one file per schema change (0001_initial_schema…)
+│   └── versions/             # one file per schema change (0001_initial…, 0002_add_notifications…)
 ├── shared/                   # code reused by every service
-│   ├── config.py             # env-driven settings (incl. fraud thresholds)
+│   ├── config.py             # env-driven settings (incl. fraud + rabbitmq)
 │   ├── database.py           # SQLAlchemy engine + session (schema = Alembic)
-│   ├── models.py             # User, Wallet, Transaction, FraudLog ORM models
+│   ├── events.py             # best-effort RabbitMQ event publisher
+│   ├── models.py             # User, Wallet, Transaction, FraudLog, Notification
 │   └── security.py           # password hashing + JWT
 ├── services/
 │   ├── api-gateway/          # proxy + rate limiting
 │   ├── user-service/         # auth
 │   ├── wallet-service/       # wallets
-│   ├── transaction-service/  # transfers (calls fraud-service)
+│   ├── transaction-service/  # transfers (calls fraud-service, publishes events)
 │   ├── fraud-service/        # rule-based fraud screening (internal)
+│   ├── notification-service/ # background worker: consumes events, writes notifications
 │   └── migrator/             # one-shot: runs `alembic upgrade head`
 └── scripts/
     ├── smoke_test.py         # end-to-end check
@@ -338,6 +438,9 @@ image can include both `shared/` and that service's `app/`.
    Next here: layer an ML model on top of the same score.
 2. ~~**Alembic migrations** to replace `create_all()`.~~ ✅ Done — see
    *Database schema & migrations* above.
-3. **RabbitMQ + notification-service** for async email/SMS on completed transfers.
+3. ~~**RabbitMQ + notification-service** for async email/SMS on completed
+   transfers.~~ ✅ Done — see *Notifications (RabbitMQ)* above. Next here: a
+   transactional outbox for an at-least-once delivery guarantee, and a real
+   email/SMS sender behind the worker.
 4. **React/Next.js frontend** wired to the gateway.
 5. **Tests** with `pytest` + a throwaway Postgres container.

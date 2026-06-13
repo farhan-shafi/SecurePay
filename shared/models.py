@@ -113,3 +113,28 @@ class FraudLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class Notification(Base):
+    """A message the notification-service 'sent' in response to an event.
+
+    The notification-service consumes transfer events from RabbitMQ and writes
+    one row per recipient (sender + payee). `channel`/`destination` record how
+    and where it was delivered (e.g. email -> user's address); this MVP only
+    logs the send, but the row is the audit trail a real sender would update.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), index=True, nullable=True
+    )
+    channel: Mapped[str] = mapped_column(String(20))  # email / sms
+    destination: Mapped[str] = mapped_column(String(255))  # email address or phone
+    message: Mapped[str] = mapped_column(Text)
+    transaction_id: Mapped[int | None] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(String(20), default="sent")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

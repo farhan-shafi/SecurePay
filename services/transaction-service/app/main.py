@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.schemas import P2PRequest, TransactionOut
 from shared.config import settings
 from shared.database import get_db
+from shared.events import publish_event
 from shared.models import Transaction, Wallet
 from shared.security import get_current_user_id
 
@@ -140,7 +141,23 @@ def transfer(
         idempotency_key=payload.idempotency_key,
         completed_at=datetime.now(timezone.utc),
     )
+    # Capture the ids before commit; afterwards the ORM objects are expired and
+    # reading them would trigger a reload.
+    sender_id, recipient_id = sender.id, recipient.id
     db.add(tx)
     db.commit()
     db.refresh(tx)
+
+    # 6. Announce the completed transfer. This is fire-and-forget: the money has
+    #    already moved, so a broker hiccup must not fail the request (see
+    #    publish_event's best-effort contract). The notification-service reacts.
+    publish_event(
+        "transaction.completed",
+        {
+            "transaction_id": tx.id,
+            "sender_wallet_id": sender_id,
+            "recipient_wallet_id": recipient_id,
+            "amount": str(payload.amount),
+        },
+    )
     return tx

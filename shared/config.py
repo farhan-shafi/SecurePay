@@ -17,6 +17,7 @@ class Settings(BaseSettings):
         "postgresql+psycopg2://securepay:securepay_dev_password@postgres:5432/securepay"
     )
     redis_url: str = "redis://redis:6379/0"
+    rabbitmq_url: str = "amqp://securepay:securepay_dev_password@rabbitmq:5672/"
 
     # JWT / auth
     jwt_secret: str = "dev-secret-change-me-to-a-long-random-string"
