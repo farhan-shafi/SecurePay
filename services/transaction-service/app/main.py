@@ -4,7 +4,6 @@ The transfer runs inside a single database transaction with both wallet rows
 locked, so the debit and credit either both happen or neither does.
 """
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -15,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas import P2PRequest, TransactionOut
 from shared.config import settings
-from shared.database import get_db, init_db
+from shared.database import get_db
 from shared.models import Transaction, Wallet
 from shared.security import get_current_user_id
 
@@ -23,14 +22,7 @@ from shared.security import get_current_user_id
 # transfer is a sync request, so we use httpx's sync client here.
 _fraud_client = httpx.Client(timeout=2.0)
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-
-
-app = FastAPI(title="SecurePay Transaction Service", lifespan=lifespan)
+app = FastAPI(title="SecurePay Transaction Service")
 
 
 def _fraud_check(sender_wallet_id: int, amount: Decimal, recipient_wallet_id: int) -> None:

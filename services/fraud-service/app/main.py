@@ -10,7 +10,6 @@ This service is internal: it is called service-to-service inside the Docker
 network and is not routed through the public API gateway.
 """
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -20,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.schemas import AnalyzeRequest, AnalyzeResponse, FraudLogOut
 from shared.config import settings
-from shared.database import get_db, init_db
+from shared.database import get_db
 from shared.models import FraudLog, Transaction
 
 # Each rule that fires adds its score. Keeping the numbers here (rather than
@@ -36,13 +35,7 @@ NEW_RECIPIENT_MIN_AMOUNT = Decimal("500.00")  # large first-time payment
 NEW_RECIPIENT_SCORE = 20
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-
-
-app = FastAPI(title="SecurePay Fraud Service", lifespan=lifespan)
+app = FastAPI(title="SecurePay Fraud Service")
 
 
 def _risk_level(score: float) -> str:

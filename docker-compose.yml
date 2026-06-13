@@ -41,6 +41,20 @@ services:
       timeout: 5s
       retries: 10
 
+  # One-shot: applies database migrations (alembic upgrade head) then exits.
+  # Every service that touches the database waits for this to finish first
+  # (depends_on: condition: service_completed_successfully), so exactly one
+  # process ever builds the schema — no more concurrent create_all() races.
+  migrator:
+    build:
+      context: .
+      dockerfile: services/migrator/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api-gateway:
     build:
       context: .
@@ -75,6 +89,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
 
   wallet-service:
     build:
@@ -88,6 +104,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
 
   transaction-service:
     build:
@@ -102,6 +120,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
       fraud-service:
         condition: service_started
 
@@ -116,6 +136,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

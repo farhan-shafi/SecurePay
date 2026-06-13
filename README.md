@@ -19,6 +19,7 @@ in, fund a wallet, and send money to each other.
 | **wallet-service** | 8002 | Create wallet, check balance, mock deposit, statement. |
 | **transaction-service** | 8003 | Atomic peer-to-peer transfers. Calls the fraud service before moving money. |
 | **fraud-service** | 8004 | Rule-based, real-time fraud screening. Scores each transfer and can block it. |
+| **migrator** | — | One-shot: runs the Alembic database migrations at startup, then exits. |
 | **postgres** | 5432 | The single shared database. |
 | **redis** | 6379 | Backs the gateway's rate limiter. |
 
@@ -121,6 +122,51 @@ SELECT * FROM transactions ORDER BY created_at DESC;
 Notice the `balance >= 0` CHECK constraint on `wallets` and the unique
 `idempotency_key` on `transactions` — the database enforces correctness even if
 application code has a bug.
+
+---
+
+## Database schema & migrations (Alembic)
+
+The schema is **versioned with Alembic** — the migration tool most
+Python/Postgres projects use. Rather than each service calling `create_all()` on
+startup (which races when several boot at once, and can't express changes like
+"add a column" or "rename a table"), there is one ordered history of migration
+files in [`migrations/versions/`](migrations/versions/).
+
+**How it runs.** A dedicated one-shot **migrator** container runs `alembic
+upgrade head` *before* any application service boots, then exits. Every service
+that touches the database waits for it to finish:
+
+```yaml
+depends_on:
+  migrator:
+    condition: service_completed_successfully
+```
+
+So exactly one process ever builds the schema — no more concurrent `create_all()`
+races. You don't run anything by hand: `docker compose up` applies migrations
+automatically. Alembic records the applied version in an `alembic_version`
+table, so on the next `up` it sees the database is already current and does
+nothing.
+
+**Changing the schema later.** When you edit the ORM models in
+[`shared/models.py`](shared/models.py), generate a migration that captures the
+diff between your models and the live database:
+
+```bash
+# 1. Edit shared/models.py (add a column, table, index, ...).
+# 2. Autogenerate a migration. The -v mount makes the new file land on your
+#    host (in migrations/versions/), not just inside the container:
+docker compose run --rm -v "$PWD/migrations:/app/migrations" migrator \
+  alembic revision --autogenerate -m "add merchants table"
+# 3. READ the generated file, then apply it:
+docker compose up -d migrator       # re-runs the one-shot migrator
+```
+
+Always review the generated file before applying — autogenerate is an excellent
+first draft, not gospel (it can miss data backfills and some constraint
+changes). Handy read-only commands (run them the same `docker compose run` way):
+`alembic current`, `alembic history`.
 
 ---
 
@@ -257,12 +303,16 @@ FROM fraud_logs ORDER BY created_at DESC;
 
 ```
 securepay/
-├── docker-compose.yml        # defines all 7 containers + healthchecks
+├── docker-compose.yml        # defines all 8 containers + healthchecks
 ├── requirements.txt          # shared Python deps for every service
 ├── .env.example              # copy to .env (passwords, JWT secret)
+├── alembic.ini               # Alembic config (schema migrations)
+├── migrations/               # the ordered migration history
+│   ├── env.py                # wires Alembic to the models + DATABASE_URL
+│   └── versions/             # one file per schema change (0001_initial_schema…)
 ├── shared/                   # code reused by every service
 │   ├── config.py             # env-driven settings (incl. fraud thresholds)
-│   ├── database.py           # SQLAlchemy engine/session + table bootstrap
+│   ├── database.py           # SQLAlchemy engine + session (schema = Alembic)
 │   ├── models.py             # User, Wallet, Transaction, FraudLog ORM models
 │   └── security.py           # password hashing + JWT
 ├── services/
@@ -270,7 +320,8 @@ securepay/
 │   ├── user-service/         # auth
 │   ├── wallet-service/       # wallets
 │   ├── transaction-service/  # transfers (calls fraud-service)
-│   └── fraud-service/        # rule-based fraud screening (internal)
+│   ├── fraud-service/        # rule-based fraud screening (internal)
+│   └── migrator/             # one-shot: runs `alembic upgrade head`
 └── scripts/
     ├── smoke_test.py         # end-to-end check
     └── fraud_demo.py         # demonstrates a transfer getting blocked
@@ -285,7 +336,8 @@ image can include both `shared/` and that service's `app/`.
 
 1. ~~**Fraud service** (rule-based first).~~ ✅ Done — see *Fraud screening* above.
    Next here: layer an ML model on top of the same score.
-2. **Alembic migrations** to replace `create_all()` once the schema stabilises.
+2. ~~**Alembic migrations** to replace `create_all()`.~~ ✅ Done — see
+   *Database schema & migrations* above.
 3. **RabbitMQ + notification-service** for async email/SMS on completed transfers.
 4. **React/Next.js frontend** wired to the gateway.
 5. **Tests** with `pytest` + a throwaway Postgres container.

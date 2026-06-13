@@ -1,6 +1,5 @@
 """Wallet service: create a wallet, check balance, deposit (mock), statement."""
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, status
@@ -8,18 +7,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.schemas import DepositRequest, StatementEntry, WalletOut
-from shared.database import get_db, init_db
+from shared.database import get_db
 from shared.models import Transaction, Wallet
 from shared.security import get_current_user_id
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-
-
-app = FastAPI(title="SecurePay Wallet Service", lifespan=lifespan)
+app = FastAPI(title="SecurePay Wallet Service")
 
 
 def _require_wallet(db: Session, user_id: int, *, lock: bool = False) -> Wallet:

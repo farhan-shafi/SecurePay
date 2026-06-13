@@ -1,13 +1,11 @@
 """User service: registration, login (JWT issuance), and profile lookup."""
 
-from contextlib import asynccontextmanager
-
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut
-from shared.database import get_db, init_db
+from shared.database import get_db
 from shared.models import User
 from shared.security import (
     create_access_token,
@@ -17,14 +15,7 @@ from shared.security import (
     verify_password,
 )
 
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-
-
-app = FastAPI(title="SecurePay User Service", lifespan=lifespan)
+app = FastAPI(title="SecurePay User Service")
 
 
 @app.get("/health")
