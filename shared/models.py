@@ -1,8 +1,9 @@
 """ORM models shared across services.
 
-This first MVP pass covers the core slice: users, wallets, and transactions.
-The full schema in the architecture doc (merchants, bills, fraud_logs,
-audit_logs) can be added the same way as the project grows.
+This MVP covers the core slice (users, wallets, transactions) plus fraud_logs,
+which backs the rule-based fraud service. The remaining tables in the
+architecture doc (merchants, bills, audit_logs) can be added the same way as
+the project grows.
 """
 
 from datetime import datetime
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Text,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.database import Base
@@ -86,4 +88,28 @@ class Transaction(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class FraudLog(Base):
+    """One row per transfer that the fraud service flagged or blocked.
+
+    The fraud service writes these during analysis, *before* the transfer is
+    committed, so `transaction_id` is null for blocked attempts that never
+    become a real transaction. `detected_signals` is JSONB so we can store the
+    list of rules that fired (e.g. ["high_velocity", "unusual_amount"]) and
+    query into it later.
+    """
+
+    __tablename__ = "fraud_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    transaction_id: Mapped[int | None] = mapped_column(nullable=True)
+    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"), index=True)
+    fraud_score: Mapped[Decimal] = mapped_column(Numeric(5, 2))
+    risk_level: Mapped[str] = mapped_column(String(20), index=True)  # low/medium/high/critical
+    detected_signals: Mapped[list] = mapped_column(JSONB, default=list)
+    action_taken: Mapped[str] = mapped_column(String(20))  # approve/review/block
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )

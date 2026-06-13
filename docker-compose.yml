@@ -9,6 +9,7 @@
 #   user-service         8001 -> 8000
 #   wallet-service       8002 -> 8000
 #   transaction-service  8003 -> 8000
+#   fraud-service        8004 -> 8000   (internal; called by transaction-service)
 #   postgres             5432 -> 5432
 #   redis                6379 -> 6379
 
@@ -97,6 +98,21 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
+      FRAUD_SERVICE_URL: http://fraud-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      fraud-service:
+        condition: service_started
+
+  fraud-service:
+    build:
+      context: .
+      dockerfile: services/fraud-service/Dockerfile
+    ports:
+      - "8004:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     depends_on:
       postgres:
         condition: service_healthy

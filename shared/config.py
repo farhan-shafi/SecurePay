@@ -28,9 +28,15 @@ class Settings(BaseSettings):
     user_service_url: str = "http://user-service:8000"
     wallet_service_url: str = "http://wallet-service:8000"
     transaction_service_url: str = "http://transaction-service:8000"
+    fraud_service_url: str = "http://fraud-service:8000"
 
     # Gateway rate limiting
     rate_limit_per_minute: int = 100
+
+    # Fraud: a transfer is blocked when its fraud score reaches this threshold
+    # (HIGH/CRITICAL). Lower scores are allowed through, though MEDIUM ones are
+    # still logged for review. See the fraud service for the scoring rules.
+    fraud_block_threshold: int = 60
 
 
 settings = Settings()
