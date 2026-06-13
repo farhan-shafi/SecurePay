@@ -31,8 +31,11 @@ is internal** — it's called service-to-service by the transaction-service and 
 deliberately *not* routed through the public gateway. Port 8004 is exposed only
 so you can read its fraud logs while learning.
 
-Not in this pass yet (next steps): merchant/bill payments and the React
-frontend.
+There's also a **React Native (Expo) mobile app** in [`mobile/`](mobile/) that
+drives this backend — register, open a wallet, deposit, send money, view activity.
+See [`mobile/README.md`](mobile/README.md) to run it on your phone.
+
+Not in this pass yet (next steps): merchant/bill payments.
 
 ---
 
@@ -422,9 +425,10 @@ securepay/
 │   ├── fraud-service/        # rule-based fraud screening (internal)
 │   ├── notification-service/ # background worker: consumes events, writes notifications
 │   └── migrator/             # one-shot: runs `alembic upgrade head`
-└── scripts/
-    ├── smoke_test.py         # end-to-end check
-    └── fraud_demo.py         # demonstrates a transfer getting blocked
+├── scripts/
+│   ├── smoke_test.py         # end-to-end check
+│   └── fraud_demo.py         # demonstrates a transfer getting blocked
+└── mobile/                   # React Native (Expo) wallet app — see mobile/README.md
 ```
 
 Each service's `Dockerfile` uses the **repo root** as its build context so the
@@ -442,5 +446,7 @@ image can include both `shared/` and that service's `app/`.
    transfers.~~ ✅ Done — see *Notifications (RabbitMQ)* above. Next here: a
    transactional outbox for an at-least-once delivery guarantee, and a real
    email/SMS sender behind the worker.
-4. **React/Next.js frontend** wired to the gateway.
+4. ~~**Frontend** wired to the gateway.~~ ✅ Done — a **React Native (Expo)**
+   mobile app in [`mobile/`](mobile/) (auth, wallet, deposit, P2P send, activity).
+   Next here: push notifications and a web build.
 5. **Tests** with `pytest` + a throwaway Postgres container.
