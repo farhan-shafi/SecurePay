@@ -1,0 +1,105 @@
+# SecurePay local development stack.
+#
+# Bring everything up with:   docker compose up --build
+# Stop and remove with:       docker compose down
+# Wipe the database too with: docker compose down -v
+#
+# Service ports (host:container):
+#   api-gateway          8000 -> 8000   (the only entrypoint you normally call)
+#   user-service         8001 -> 8000
+#   wallet-service       8002 -> 8000
+#   transaction-service  8003 -> 8000
+#   postgres             5432 -> 5432
+#   redis                6379 -> 6379
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # Services wait for this to pass before they start (see depends_on below).
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET}
+      USER_SERVICE_URL: http://user-service:8000
+      WALLET_SERVICE_URL: http://wallet-service:8000
+      TRANSACTION_SERVICE_URL: http://transaction-service:8000
+    depends_on:
+      redis:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+      wallet-service:
+        condition: service_started
+      transaction-service:
+        condition: service_started
+
+  user-service:
+    build:
+      context: .
+      dockerfile: services/user-service/Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  wallet-service:
+    build:
+      context: .
+      dockerfile: services/wallet-service/Dockerfile
+    ports:
+      - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  transaction-service:
+    build:
+      context: .
+      dockerfile: services/transaction-service/Dockerfile
+    ports:
+      - "8003:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
