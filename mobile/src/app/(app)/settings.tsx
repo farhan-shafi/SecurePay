@@ -3,8 +3,7 @@
  * user's profile and wallet details, and is where Sign out lives.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { type ReactNode } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
 import { Card } from '@/components/Card';
@@ -13,14 +12,24 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { currencyMeta } from '@/lib/currencies';
 import { formatDateTime, initials } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
-import { useProfile, useWallet } from '@/lib/queries';
+import { useProfile, useVerifyIdentity, useWallet } from '@/lib/queries';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
 export default function Settings() {
   const { signOut } = useAuth();
   const profile = useProfile();
   const wallet = useWallet();
+  const verify = useVerifyIdentity();
   const u = profile.data;
+
+  const onVerify = () => {
+    verify.mutate(undefined, {
+      onSuccess: () =>
+        Alert.alert('Identity verified', 'Your account is now verified.'),
+      onError: () =>
+        Alert.alert('Verification failed', 'Please try again in a moment.'),
+    });
+  };
 
   return (
     <View style={styles.flex}>
@@ -42,14 +51,36 @@ export default function Settings() {
             {/* Account details */}
             <Text style={styles.sectionTitle}>Details</Text>
             <Card style={styles.detailCard}>
+              <DetailRow icon="mail-outline" label="Email" value={u.email} />
+              <Divider />
               <DetailRow icon="call-outline" label="Phone" value={u.phone_number} />
               <Divider />
-              <DetailRow
-                icon="shield-checkmark-outline"
-                label="Identity"
-                value={u.kyc_verified ? 'Verified' : 'Not verified'}
-                valueColor={u.kyc_verified ? colors.success : colors.textSecondary}
-              />
+              {/* Identity — tappable "Verify now" when not yet verified */}
+              <View style={styles.row}>
+                <Ionicons
+                  name="shield-checkmark-outline"
+                  size={20}
+                  color={colors.textSecondary}
+                />
+                <Text style={[styles.rowLabel, styles.grow]}>Identity</Text>
+                {u.kyc_verified ? (
+                  <Text style={[styles.rowValueStatic, { color: colors.success }]}>
+                    Verified
+                  </Text>
+                ) : (
+                  <Pressable
+                    onPress={onVerify}
+                    disabled={verify.isPending}
+                    style={styles.verifyBtn}
+                  >
+                    {verify.isPending ? (
+                      <ActivityIndicator size="small" color={colors.onBrand} />
+                    ) : (
+                      <Text style={styles.verifyText}>Verify now</Text>
+                    )}
+                  </Pressable>
+                )}
+              </View>
               <Divider />
               <DetailRow
                 icon="calendar-outline"
@@ -157,7 +188,26 @@ const styles = StyleSheet.create({
     fontSize: font.size.md,
     color: colors.textPrimary,
   },
+  rowValueStatic: {
+    fontFamily: font.family.semibold,
+    fontSize: font.size.md,
+    color: colors.textPrimary,
+  },
+  grow: { flex: 1 },
   divider: { height: 1, backgroundColor: colors.border },
+  verifyBtn: {
+    backgroundColor: colors.brand,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    minWidth: 92,
+    alignItems: 'center',
+  },
+  verifyText: {
+    fontFamily: font.family.semibold,
+    fontSize: font.size.sm,
+    color: colors.onBrand,
+  },
   signOut: {
     flexDirection: 'row',
     alignItems: 'center',

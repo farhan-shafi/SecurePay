@@ -167,6 +167,8 @@ export const api = {
 
   me: () => request<User>('GET', '/api/users/me'),
 
+  verifyIdentity: () => request<User>('POST', '/api/users/me/verify'),
+
   createWallet: (currency: string) =>
     request<Wallet>('POST', '/api/wallets/create', { currency }),
 
