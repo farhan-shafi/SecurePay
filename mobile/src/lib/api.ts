@@ -136,6 +136,12 @@ export interface Quote {
   same_currency: boolean;
 }
 
+export interface Lookup {
+  wallet_id: number;
+  name: string;
+  currency: string;
+}
+
 export interface RegisterPayload {
   email: string;
   phone_number: string;
@@ -174,6 +180,14 @@ export const api = {
 
   sendP2P: (body: P2PPayload) =>
     request<TransactionOut>('POST', '/api/transactions/p2p', body),
+
+  // Resolve a person by email or wallet id (before saving / sending).
+  lookupPayee: (query: { email?: string; walletId?: number }) => {
+    const qs = query.email
+      ? `email=${encodeURIComponent(query.email)}`
+      : `wallet_id=${query.walletId}`;
+    return request<Lookup>('GET', `/api/wallets/lookup?${qs}`);
+  },
 
   // Beneficiaries (saved payees)
   listBeneficiaries: () =>

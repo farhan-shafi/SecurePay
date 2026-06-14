@@ -88,23 +88,32 @@ export default function Beneficiaries() {
         renderItem={({ item }) => {
           const meta = currencyMeta(item.currency);
           return (
-            <Pressable
-              style={styles.row}
-              onPress={() => openSend(item)}
-              onLongPress={() => confirmRemove(item)}
-            >
-              <Avatar label={nameInitials(item.nickname || item.name)} size={46} />
-              <View style={styles.rowText}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  {item.nickname || item.name}
-                </Text>
-                <Text style={styles.rowSub} numberOfLines={1}>
-                  {item.nickname ? `${item.name} · ` : ''}
-                  {meta.flag} {item.currency} · wallet #{item.wallet_id}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-            </Pressable>
+            <View style={styles.row}>
+              <Pressable
+                style={styles.rowMain}
+                onPress={() => openSend(item)}
+                onLongPress={() => confirmRemove(item)}
+              >
+                <Avatar label={nameInitials(item.nickname || item.name)} size={46} />
+                <View style={styles.rowText}>
+                  <Text style={styles.rowName} numberOfLines={1}>
+                    {item.nickname || item.name}
+                  </Text>
+                  <Text style={styles.rowSub} numberOfLines={1}>
+                    {item.nickname ? `${item.name} · ` : ''}
+                    {meta.flag} {item.currency} · wallet #{item.wallet_id}
+                  </Text>
+                </View>
+              </Pressable>
+              <Pressable
+                onPress={() => confirmRemove(item)}
+                hitSlop={10}
+                style={styles.deleteBtn}
+                accessibilityLabel={`Remove ${item.nickname || item.name}`}
+              >
+                <Ionicons name="trash-outline" size={20} color={colors.danger} />
+              </Pressable>
+            </View>
           );
         }}
         ListEmptyComponent={
@@ -157,12 +166,25 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
     backgroundColor: colors.surface,
-    padding: spacing.lg,
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.sm,
     borderRadius: radius.lg,
   },
+  rowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.lg,
+  },
   rowText: { flex: 1 },
+  deleteBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   rowName: {
     fontFamily: font.family.semibold,
     fontSize: font.size.lg,
