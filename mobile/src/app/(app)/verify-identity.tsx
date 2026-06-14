@@ -55,8 +55,10 @@ export default function VerifyIdentity() {
     }
     confirm.mutate(code.trim(), {
       onSuccess: () => {
-        Alert.alert('Verified', 'Your identity has been verified.');
-        router.back();
+        Alert.alert('Email verified', 'Now choose a currency to open your wallet.');
+        // Go straight to creating the wallet — a natural next step that also
+        // avoids the home screen briefly showing the create card behind this one.
+        router.replace('/(app)/create-wallet');
       },
       onError: (e) =>
         setError(e instanceof ApiError ? e.message : 'Verification failed.'),

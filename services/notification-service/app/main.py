@@ -37,26 +37,45 @@ QUEUE = "notifications"
 BINDING_KEY = "transaction.*"
 
 
-def _notify(db, wallet_id: int, amount, verb: str, transaction_id: int) -> None:
+def _owner_name(db, wallet_id) -> str | None:
+    """Full name of the person who owns `wallet_id`, if any."""
+    if not wallet_id:
+        return None
+    w = db.get(Wallet, wallet_id)
+    if w and w.user:
+        return f"{w.user.first_name} {w.user.last_name}"
+    return None
+
+
+def _notify(db, wallet_id: int, amount, verb: str, other_wallet_id, transaction_id: int) -> None:
     """Email the user who owns `wallet_id` and record the notification.
 
-    `amount` is formatted in THAT wallet's own currency, so the sender sees what
-    they paid (their currency) and the recipient sees what they got (theirs).
+    `amount` is in THAT wallet's own currency, and the message names the other
+    party — "You sent £100.00 to Bob Smith" / "You received $134.03 from Alice".
     """
     wallet = db.get(Wallet, wallet_id)
     if wallet is None or wallet.user is None:
         return
     user = wallet.user
     money = format_money(amount, wallet.currency)
-    message = f"You {verb} {money}."
+    other_name = _owner_name(db, other_wallet_id)
+    preposition = "to" if verb == "sent" else "from"
+    who = f" {preposition} {other_name}" if other_name else ""
+    message = f"You {verb} {money}{who}."
     html = (
         f"<p>Hi {user.first_name},</p>"
         f"<p>{message}</p>"
         f"<p style='color:#6B6E86'>Reference: TXN-{transaction_id}</p>"
         f"<p style='color:#6B6E86'>— SecurePay</p>"
     )
+    text = (
+        f"Hi {user.first_name},\n\n{message}\n"
+        f"Reference: TXN-{transaction_id}\n\n— SecurePay"
+    )
     # Best-effort send (never raises); we record the row regardless.
-    sent = send_email(user.email, "SecurePay — transaction update", html, to_name=user.first_name)
+    sent = send_email(
+        user.email, "SecurePay — transaction update", html, to_name=user.first_name, text=text
+    )
     db.add(
         Notification(
             user_id=user.id,
@@ -75,9 +94,11 @@ def _handle_transaction_completed(payload: dict) -> None:
     amount = payload["amount"]
     # For cross-currency transfers the recipient received a converted amount.
     recipient_amount = payload.get("recipient_amount", amount)
+    sender_w = payload["sender_wallet_id"]
+    recipient_w = payload["recipient_wallet_id"]
     with SessionLocal() as db:
-        _notify(db, payload["sender_wallet_id"], amount, "sent", tx_id)
-        _notify(db, payload["recipient_wallet_id"], recipient_amount, "received", tx_id)
+        _notify(db, sender_w, amount, "sent", recipient_w, tx_id)
+        _notify(db, recipient_w, recipient_amount, "received", sender_w, tx_id)
         db.commit()
 
 

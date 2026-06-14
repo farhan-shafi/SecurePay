@@ -148,8 +148,12 @@ def verify_start(
         f"<p style='font-size:30px;font-weight:bold;letter-spacing:4px'>{code}</p>"
         f"<p>It expires in 5 minutes. If you didn't request this, ignore this email.</p>"
     )
+    text = (
+        f"Hi {user.first_name},\n\nYour SecurePay verification code is {code}. "
+        f"It expires in 5 minutes.\nIf you didn't request this, ignore this email."
+    )
     email_sent = send_email(
-        user.email, "Your SecurePay verification code", html, to_name=user.first_name
+        user.email, "Your SecurePay verification code", html, to_name=user.first_name, text=text
     )
     print(f"[KYC] code for user {user_id} ({user.email}): {code} (email_sent={email_sent})")
 

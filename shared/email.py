@@ -23,8 +23,14 @@ def send_email(
     subject: str,
     html: str,
     to_name: str | None = None,
+    text: str | None = None,
 ) -> bool:
-    """Send one email. Returns True if Brevo accepted it, False otherwise."""
+    """Send one email. Returns True if Brevo accepted it, False otherwise.
+
+    Pass `text` (a plain-text version) when you can — having both an HTML and a
+    text part is one of the things spam filters look for, so it improves
+    deliverability.
+    """
     if not settings.brevo_api_key:
         log.info("[email mock] to=%s subject=%r", to_email, subject)
         return False
@@ -32,6 +38,18 @@ def send_email(
     recipient = {"email": to_email}
     if to_name:
         recipient["name"] = to_name
+
+    body: dict = {
+        "sender": {
+            "name": settings.email_sender_name,
+            "email": settings.email_sender,
+        },
+        "to": [recipient],
+        "subject": subject,
+        "htmlContent": html,
+    }
+    if text:
+        body["textContent"] = text
 
     try:
         resp = _client.post(
@@ -41,15 +59,7 @@ def send_email(
                 "accept": "application/json",
                 "content-type": "application/json",
             },
-            json={
-                "sender": {
-                    "name": settings.email_sender_name,
-                    "email": settings.email_sender,
-                },
-                "to": [recipient],
-                "subject": subject,
-                "htmlContent": html,
-            },
+            json=body,
         )
         resp.raise_for_status()
         log.info("email sent to %s (%r)", to_email, subject)
