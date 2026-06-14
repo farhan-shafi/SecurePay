@@ -112,7 +112,12 @@ def me(
 ):
     user = db.get(User, user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        # The token is well-formed but its user no longer exists (e.g. the DB was
+        # reset). That's an authentication problem, not a missing resource — so
+        # return 401 so the app signs the stale session out and goes to login.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Account no longer exists"
+        )
     return user
 
 
