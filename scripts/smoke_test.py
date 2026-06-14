@@ -10,6 +10,8 @@ Usage:
 """
 
 import json
+import re
+import subprocess
 import urllib.error
 import urllib.request
 
@@ -59,6 +61,38 @@ def login(email):
     return payload["access_token"]
 
 
+def _otp_from_logs(email):
+    """Read the latest verification code the user-service logged for `email`.
+
+    Wallets now require a verified email. The code is normally emailed (and the
+    API returns dev_code only when no email provider is configured), so for this
+    local test we fall back to reading it from the container logs.
+    """
+    try:
+        out = subprocess.run(
+            ["docker", "compose", "logs", "--tail=400", "user-service"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout
+    except Exception:
+        return None
+    found = re.findall(rf"\({re.escape(email)}\): (\d{{6}})", out)
+    return found[-1] if found else None
+
+
+def verify_email(token, email):
+    """Complete email verification so this user can create a wallet."""
+    status, body = call(
+        "POST", "/api/users/me/verify/start", token=token, expect=(200, 400)
+    )
+    if status != 200:
+        return  # 400 = already verified from a previous run; nothing to do
+    code = (body or {}).get("dev_code") or _otp_from_logs(email)
+    if not code:
+        print("        could not obtain a verification code — is the stack running?")
+        return
+    call("POST", "/api/users/me/verify/confirm", {"code": code}, token=token, expect=(200,))
+
+
 def ensure_wallet(token):
     call("POST", "/api/wallets/create", token=token, expect=(201, 409))
     _, wallet = call("GET", "/api/wallets/me", token=token)
@@ -73,6 +107,10 @@ def main():
     print("2. Log in")
     alice = login("alice@example.com")
     bob = login("bob@example.com")
+
+    print("   Verify email (required before a wallet can be created)")
+    verify_email(alice, "alice@example.com")
+    verify_email(bob, "bob@example.com")
 
     print("3. Create / fetch wallets")
     alice_wallet = ensure_wallet(alice)

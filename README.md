@@ -1,9 +1,14 @@
 # SecurePay — Digital Wallet (MVP)
 
 A microservices digital wallet built with **FastAPI**, **PostgreSQL**, **Redis**,
-**RabbitMQ**, and **Docker Compose**. This repo is the first runnable slice of the larger
-[architecture design](../SecurePay_Architecture_v1.md): users can register, log
-in, fund a wallet, and send money to each other.
+**RabbitMQ**, and **Docker Compose**. This repo is a runnable slice of the larger
+[architecture design](../SecurePay_Architecture_v1.md). Users can register and
+**verify their email** (OTP), open a wallet in **USD/EUR/GBP/PKR**, fund it, save
+**beneficiaries**, and **send money** — including **across currencies**, converted
+at the live exchange rate and screened for fraud. Completed transfers and
+verification codes are delivered by **real email**. A **React Native** mobile app
+([`mobile/`](mobile/)) is the user-facing client (multi-currency UI, statements,
+PDF export, identity verification).
 
 > This README doubles as a learning guide for Docker and Postgres — it explains
 > not just *what* to run but *why* each piece exists.
@@ -15,11 +20,11 @@ in, fund a wallet, and send money to each other.
 | Service | Host port | What it does |
 |---------|-----------|--------------|
 | **api-gateway** | 8000 | Single public entrypoint. Rate-limits per IP (Redis) and proxies to the services below. |
-| **user-service** | 8001 | Register, login (issues JWT), profile (`/me`). |
-| **wallet-service** | 8002 | Create wallet, check balance, mock deposit, statement. |
-| **transaction-service** | 8003 | Atomic peer-to-peer transfers. Calls the fraud service before moving money. |
+| **user-service** | 8001 | Register, login (issues JWT), profile (`/me`), **email verification (OTP)** and **email change**. |
+| **wallet-service** | 8002 | Create wallet (currency-typed, **email-verified only**), balance, mock deposit, **statement with counterparty + FX detail**, **beneficiaries**, payee lookup. |
+| **transaction-service** | 8003 | Atomic peer-to-peer transfers. **Converts cross-currency** at the live rate, screens for fraud, and exposes a `/quote` preview. |
 | **fraud-service** | 8004 | Rule-based, real-time fraud screening. Scores each transfer and can block it. |
-| **notification-service** | — | Background worker. Consumes "transfer completed" events from RabbitMQ and records a notification per party. |
+| **notification-service** | — | Background worker. Consumes "transfer completed" events from RabbitMQ and **sends a real email** per party (currency-aware). |
 | **migrator** | — | One-shot: runs the Alembic database migrations at startup, then exits. |
 | **postgres** | 5432 | The single shared database. |
 | **redis** | 6379 | Backs the gateway's rate limiter. |
@@ -93,8 +98,17 @@ curl -s -X POST localhost:8000/api/users/register -H 'Content-Type: application/
 TOKEN=$(curl -s -X POST localhost:8000/api/users/login -H 'Content-Type: application/json' \
   -d '{"email":"me@example.com","password":"Password123!"}' | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
 
-# Create a wallet, deposit, check balance
-curl -s -X POST localhost:8000/api/wallets/create -H "Authorization: Bearer $TOKEN"
+# Verify your email first — a wallet can't be created until you do. This sends a
+# 6-digit code by email (see "Email" below); start returns dev_code only when no
+# email provider is configured, otherwise read it from `docker compose logs
+# user-service`.
+curl -s -X POST localhost:8000/api/users/me/verify/start -H "Authorization: Bearer $TOKEN"
+curl -s -X POST localhost:8000/api/users/me/verify/confirm -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"code":"123456"}'
+
+# Create a wallet (in a currency), deposit, check balance
+curl -s -X POST localhost:8000/api/wallets/create -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"currency":"USD"}'
 curl -s -X POST localhost:8000/api/wallets/me/deposit -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"amount":"500.00"}'
 curl -s localhost:8000/api/wallets/me -H "Authorization: Bearer $TOKEN"
@@ -351,9 +365,13 @@ transaction-service                rabbitmq                 notification-service
    notification-service binds `transaction.*`) without the producer changing.
 3. **Consume.** The [notification-service](services/notification-service/app/main.py)
    is a **background worker** — not an HTTP server (no port, no uvicorn). It
-   blocks in `start_consuming()`, and for each event writes one row per party to
-   the `notifications` table (the audit trail a real email/SMS sender would
-   update) and logs `email -> alice@example.com: You sent $250.00.`
+   blocks in `start_consuming()`, and for each event **sends a real email** to
+   each party (via Brevo — see *Email* below) and writes one row to the
+   `notifications` table as the audit trail. The amount is shown in **each
+   wallet's own currency**, so the sender sees what they paid and the recipient
+   sees the converted amount they received (e.g. `You sent £100.00` /
+   `You received $134.03`). With no email key configured it just logs instead —
+   so the project still runs without credentials.
 
 ### Why a separate process / queue at all?
 
@@ -400,22 +418,89 @@ the `securepay.events` exchange and the `notifications` queue in real time.
 
 ---
 
+## Multi-currency & exchange rates
+
+A wallet is opened in one currency — **USD, EUR, GBP, or PKR** (validated against
+`ALLOWED_CURRENCIES` in [`shared/fx.py`](shared/fx.py)). You can still pay someone
+who holds a *different* currency: the **transaction-service converts** the
+transfer at the live rate.
+
+- Rates come from a free, key-less provider (`open.er-api.com`), cached
+  in-process for an hour so a burst of transfers doesn't hammer it.
+- On a cross-currency transfer the sender is **debited in their currency** and
+  the recipient is **credited the converted amount in theirs**; the rate and the
+  recipient amount are stored on the `transactions` row.
+- If a rate can't be fetched for a cross-currency transfer, the transfer is
+  rejected (HTTP 503) — we never move money at the wrong value.
+- `GET /api/transactions/quote?recipient_wallet_id=…&amount=…` previews a
+  conversion so the app can show "they receive ≈ X" *before* you send.
+
+```bash
+# Preview converting 100 (your currency) to a recipient's wallet:
+curl -s "localhost:8000/api/transactions/quote?recipient_wallet_id=2&amount=100" \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+---
+
+## Beneficiaries (saved payees)
+
+Like a bank's payee list: you save someone once, then send to them by name. The
+**wallet-service** owns these (`/api/wallets/me/beneficiaries`).
+
+- **Add** a payee by wallet id; the API resolves and stores nothing extra — it
+  returns the payee's **real name** (from their account) and their wallet
+  currency, so the app shows "To Alice Smith", not a bare number.
+- **Look up** anyone first with `GET /api/wallets/lookup?email=…` (or
+  `?wallet_id=…`) — this powers the app's "add by email **or** wallet id" and the
+  choice to *save* the payee or just *send once*.
+- A `beneficiaries` table (migration `0003`) stores `(owner_user_id, wallet_id,
+  nickname)`, unique per owner+wallet.
+
+---
+
+## Email: verification & sending
+
+**Email verification (OTP).** A user must verify their email before they can open
+a wallet — `wallet-service` returns **403** until then.
+
+- `POST /api/users/me/verify/start` generates a 6-digit code, stores it in
+  **Redis with a 5-minute TTL** (auto-expiry — the right tool for one-time
+  codes), and **emails** it. `POST /me/verify/confirm` checks it and flips
+  `kyc_verified` to true.
+- **Change email** the same safe way: `/me/email/change/start` sends a code to
+  the **new** address; `/me/email/change/confirm` switches it only once that code
+  is confirmed — so you can't move your account to an address you don't own.
+
+**Sending email (Brevo).** Both the OTP and the transfer notifications go out as
+real email through [Brevo](https://www.brevo.com)'s transactional API
+([`shared/email.py`](shared/email.py)). It's **best-effort**: a failed send never
+breaks a verification or a payment, and with **no `BREVO_API_KEY` set it simply
+logs** the email instead — so the stack runs fine without credentials. To send
+for real, set `BREVO_API_KEY` + `EMAIL_SENDER` (a verified sender) in `.env`
+(see `.env.example`). SMS is *not* wired up — truly free SMS doesn't exist, so
+the "OTP" is delivered by email rather than phone.
+
+---
+
 ## Project layout
 
 ```
 securepay/
 ├── docker-compose.yml        # defines all 10 containers + healthchecks
 ├── requirements.txt          # shared Python deps for every service
-├── .env.example              # copy to .env (passwords, JWT + RabbitMQ creds)
+├── .env.example              # copy to .env (passwords, JWT, RabbitMQ + Brevo)
 ├── alembic.ini               # Alembic config (schema migrations)
 ├── migrations/               # the ordered migration history
 │   ├── env.py                # wires Alembic to the models + DATABASE_URL
-│   └── versions/             # one file per schema change (0001_initial…, 0002_add_notifications…)
+│   └── versions/             # one file per schema change (0001_initial…, 0002_notifications, 0003_beneficiaries_and_fx)
 ├── shared/                   # code reused by every service
-│   ├── config.py             # env-driven settings (incl. fraud + rabbitmq)
+│   ├── config.py             # env-driven settings (fraud, rabbitmq, fx, email)
 │   ├── database.py           # SQLAlchemy engine + session (schema = Alembic)
 │   ├── events.py             # best-effort RabbitMQ event publisher
-│   ├── models.py             # User, Wallet, Transaction, FraudLog, Notification
+│   ├── fx.py                 # live currency rates + conversion
+│   ├── email.py              # best-effort email sender (Brevo)
+│   ├── models.py             # User, Wallet, Transaction, FraudLog, Notification, Beneficiary
 │   └── security.py           # password hashing + JWT
 ├── services/
 │   ├── api-gateway/          # proxy + rate limiting
@@ -442,11 +527,18 @@ image can include both `shared/` and that service's `app/`.
    Next here: layer an ML model on top of the same score.
 2. ~~**Alembic migrations** to replace `create_all()`.~~ ✅ Done — see
    *Database schema & migrations* above.
-3. ~~**RabbitMQ + notification-service** for async email/SMS on completed
+3. ~~**RabbitMQ + notification-service** for async notifications on completed
    transfers.~~ ✅ Done — see *Notifications (RabbitMQ)* above. Next here: a
-   transactional outbox for an at-least-once delivery guarantee, and a real
-   email/SMS sender behind the worker.
+   transactional outbox for an at-least-once delivery guarantee.
 4. ~~**Frontend** wired to the gateway.~~ ✅ Done — a **React Native (Expo)**
-   mobile app in [`mobile/`](mobile/) (auth, wallet, deposit, P2P send, activity).
-   Next here: push notifications and a web build.
-5. **Tests** with `pytest` + a throwaway Postgres container.
+   mobile app in [`mobile/`](mobile/) (auth, multi-currency wallet, deposit, P2P
+   send, statement + PDF). Next here: push notifications and a web build.
+5. ~~**Multi-currency wallets + live FX conversion.**~~ ✅ Done — see
+   *Multi-currency & exchange rates* above.
+6. ~~**Beneficiaries** (saved payees) with email/wallet-id lookup.~~ ✅ Done —
+   see *Beneficiaries* above.
+7. ~~**Email verification (OTP)** + **real email sending** (Brevo) for codes and
+   transfer notifications.~~ ✅ Done — see *Email* above. Next here: real SMS
+   (paid) so the OTP can also go to a phone.
+8. **Tests** with `pytest` + a throwaway Postgres container.
+9. **Merchant / bill payments** (deferred from the architecture doc).

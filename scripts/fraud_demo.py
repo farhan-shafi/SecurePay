@@ -16,6 +16,8 @@ gateway).
 """
 
 import json
+import re
+import subprocess
 import urllib.error
 import urllib.request
 
@@ -36,14 +38,36 @@ def call(method, url, body=None, token=None):
         return err.code, json.loads(err.read() or "null")
 
 
+def _otp_from_logs(email):
+    """Read the latest verification code user-service logged for `email` (wallets
+    require a verified email; the code is normally emailed)."""
+    try:
+        out = subprocess.run(
+            ["docker", "compose", "logs", "--tail=400", "user-service"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout
+    except Exception:
+        return None
+    found = re.findall(rf"\({re.escape(email)}\): (\d{{6}})", out)
+    return found[-1] if found else None
+
+
+def verify_email(token, email):
+    _, body = call("POST", f"{GATEWAY}/api/users/me/verify/start", token=token)
+    code = (body or {}).get("dev_code") or _otp_from_logs(email)
+    if code:
+        call("POST", f"{GATEWAY}/api/users/me/verify/confirm", {"code": code}, token=token)
+
+
 def setup_user(email, phone):
-    """Register (idempotently), log in, ensure a wallet, return (token, wallet_id)."""
+    """Register (idempotently), log in, verify email, ensure a wallet."""
     call("POST", f"{GATEWAY}/api/users/register", {
         "email": email, "phone_number": phone, "password": "Password123!",
         "first_name": email.split("@")[0].title(), "last_name": "Demo",
     })
     _, login = call("POST", f"{GATEWAY}/api/users/login", {"email": email, "password": "Password123!"})
     token = login["access_token"]
+    verify_email(token, email)  # wallets require a verified email
     call("POST", f"{GATEWAY}/api/wallets/create", token=token)
     _, wallet = call("GET", f"{GATEWAY}/api/wallets/me", token=token)
     return token, wallet["id"]

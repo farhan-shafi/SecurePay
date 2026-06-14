@@ -1,8 +1,10 @@
 # SecurePay — Mobile app
 
 A React Native (Expo) wallet client for the SecurePay backend. Register / log in,
-open a wallet, top it up, send peer-to-peer transfers, and browse your activity —
-all talking to the same API gateway the backend exposes on port 8000.
+verify your email (OTP), open a wallet in USD/EUR/GBP/PKR, top it up, save payees
+and send money (converted across currencies at the live rate), and browse a
+statement you can export as a PDF — all talking to the same API gateway the
+backend exposes on port 8000.
 
 The stack is intentionally lean and "all-Expo" so it runs in **Expo Go** on a
 real phone with no native build step:
@@ -47,26 +49,41 @@ the gateway.
 
 ```
 mobile/src/
-├── app/                     # Expo Router screens (file = route)
-│   ├── _layout.tsx          # providers (React Query, Auth), fonts, splash gate
-│   ├── index.tsx            # redirects to (app) or (auth) based on the token
-│   ├── (auth)/              # login / register  (shown when logged out)
-│   └── (app)/               # tab bar: Home · Send · Activity (requires a token)
-│       ├── index.tsx        # balance card, quick actions, recent activity
-│       ├── send.tsx         # P2P transfer + success screen
-│       └── activity.tsx     # full statement, pull-to-refresh
+├── app/                       # Expo Router screens (file = route)
+│   ├── _layout.tsx            # providers (React Query, Auth), fonts, splash gate
+│   ├── index.tsx              # redirects to (app) or (auth) based on the token
+│   ├── (auth)/                # login / register  (shown when logged out)
+│   └── (app)/                 # a Stack over the tab bar (requires a token)
+│       ├── (tabs)/            # bottom tabs: Home · Payees · Statement
+│       │   ├── index.tsx      # balance card (+ eye toggle), quick actions, recent
+│       │   ├── beneficiaries.tsx  # saved payees (add / send / delete)
+│       │   └── statement.tsx  # full statement, date filter, PDF download
+│       ├── send.tsx           # send to a payee (live FX preview) + success
+│       ├── add-beneficiary.tsx# look up by email/wallet-id → save or send once
+│       ├── create-wallet.tsx  # pick a currency, open a wallet
+│       ├── verify-identity.tsx# email OTP verification
+│       ├── change-email.tsx   # change email (OTP to the new address)
+│       ├── settings.tsx       # account details + sign out
+│       └── transaction/[id].tsx  # one transaction's detail + Save as PDF
 ├── lib/
-│   ├── config.ts            # API base URL (auto-derived LAN IP)
-│   ├── api.ts               # typed fetch client + JWT bearer + ApiError
-│   ├── auth.tsx             # AuthProvider/useAuth, token in secure-store
-│   ├── queries.ts           # React Query hooks (wallet, statement, mutations)
-│   └── format.ts            # money/date formatting (no Intl, engine-agnostic)
+│   ├── config.ts              # API base URL (LAN IP / EXPO_PUBLIC_API_URL override)
+│   ├── api.ts                 # typed fetch client + JWT bearer + ApiError
+│   ├── auth.tsx               # AuthProvider/useAuth, token in secure-store
+│   ├── queries.ts             # React Query hooks (wallet, statement, beneficiaries…)
+│   ├── currencies.ts          # USD/EUR/GBP/PKR metadata
+│   ├── format.ts              # money/date formatting (no Intl, engine-agnostic)
+│   └── pdf.ts                 # build + save/share statement & receipt PDFs
 ├── theme/
-│   └── tokens.ts            # colours, spacing, radius, type, shadows
-└── components/              # Button, TextField, Card, BalanceCard, …
+│   └── tokens.ts              # colours, spacing, radius, type, shadows
+└── components/                # Button, TextField, Card, BalanceCard, …
 ```
 
 The screens never call `fetch` directly — they go through the React Query hooks in
 `lib/queries.ts`, which call the typed endpoints in `lib/api.ts`. After a deposit
 or transfer those hooks invalidate the `wallet` and `statement` queries so the
-balance and activity list update on their own.
+balance and statement update on their own.
+
+> Note: a wallet can only be created once the account's **email is verified**, so
+> the Home screen shows a "Verify your email" prompt until you do (Settings →
+> Verify). Cross-currency sends are converted at the live rate, and the Statement
+> tab can be filtered by date and exported as a PDF.
