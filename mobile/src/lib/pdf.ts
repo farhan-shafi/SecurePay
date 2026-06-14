@@ -5,8 +5,17 @@
  * file; expo-sharing then opens the share sheet so the user can "Save to Files",
  * AirDrop, email it, etc. Keeping it as HTML means the layout is easy to style.
  */
+import { Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+// SDK 54 moved these file ops to the legacy entry point (the new default API is
+// the File/Directory classes, which don't expose the Storage Access Framework).
+import {
+  EncodingType,
+  StorageAccessFramework as SAF,
+  readAsStringAsync,
+  writeAsStringAsync,
+} from 'expo-file-system/legacy';
 
 import { type StatementEntry, type User, type Wallet } from './api';
 import { currencyMeta } from './currencies';
@@ -133,14 +142,41 @@ export function buildReceiptHtml(e: StatementEntry, user: User | undefined): str
   return shell('Receipt', body);
 }
 
-/** Render `html` to a PDF and open the share sheet. */
-export async function exportPdf(html: string, fileName: string): Promise<void> {
-  const { uri } = await Print.printToFileAsync({ html });
+export type SaveResult = 'saved' | 'shared' | 'cancelled';
+
+async function share(uri: string, fileName: string): Promise<SaveResult> {
   if (await Sharing.isAvailableAsync()) {
     await Sharing.shareAsync(uri, {
       mimeType: 'application/pdf',
       dialogTitle: fileName,
       UTI: 'com.adobe.pdf',
     });
+    return 'shared';
   }
+  return 'cancelled';
+}
+
+/**
+ * Render `html` to a PDF and let the user keep it.
+ *  - Android: open the system folder picker and write the file there (a real
+ *    "download" to e.g. Downloads). Falls back to the share sheet if they cancel.
+ *  - iOS: the share sheet, whose "Save to Files" is the native way to save.
+ */
+export async function savePdf(html: string, fileName: string): Promise<SaveResult> {
+  const { uri } = await Print.printToFileAsync({ html });
+
+  if (Platform.OS === 'android') {
+    const perm = await SAF.requestDirectoryPermissionsAsync();
+    if (!perm.granted) return share(uri, fileName); // user backed out of the picker
+    const base64 = await readAsStringAsync(uri, { encoding: EncodingType.Base64 });
+    const destUri = await SAF.createFileAsync(
+      perm.directoryUri,
+      fileName.replace(/\.pdf$/i, ''),
+      'application/pdf',
+    );
+    await writeAsStringAsync(destUri, base64, { encoding: EncodingType.Base64 });
+    return 'saved';
+  }
+
+  return share(uri, fileName);
 }

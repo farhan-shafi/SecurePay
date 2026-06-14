@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TransactionRow } from '@/components/TransactionRow';
 import { ApiError } from '@/lib/api';
-import { buildStatementHtml, exportPdf } from '@/lib/pdf';
+import { buildStatementHtml, savePdf } from '@/lib/pdf';
 import { useProfile, useStatement, useWallet } from '@/lib/queries';
 import { colors, font, radius, shadow, spacing } from '@/theme/tokens';
 
@@ -55,10 +55,13 @@ export default function Statement() {
     }
     setDownloading(true);
     try {
-      await exportPdf(
+      const result = await savePdf(
         buildStatementHtml(data, profile.data, wallet.data ?? undefined, rangeLabel),
         'securepay-statement.pdf',
       );
+      if (result === 'saved') {
+        Alert.alert('Saved', 'Your statement PDF was saved to your selected folder.');
+      }
     } catch {
       Alert.alert('Could not create PDF', 'Please try again.');
     } finally {

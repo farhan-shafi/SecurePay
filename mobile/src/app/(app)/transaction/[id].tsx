@@ -13,7 +13,7 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { formatDateTime, formatMoney, humanize } from '@/lib/format';
-import { buildReceiptHtml, exportPdf } from '@/lib/pdf';
+import { buildReceiptHtml, savePdf } from '@/lib/pdf';
 import { useProfile, useStatement } from '@/lib/queries';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
@@ -58,7 +58,13 @@ export default function TransactionDetail() {
   const onSave = async () => {
     setSaving(true);
     try {
-      await exportPdf(buildReceiptHtml(entry, profile.data), `receipt-TXN-${entry.id}.pdf`);
+      const result = await savePdf(
+        buildReceiptHtml(entry, profile.data),
+        `receipt-TXN-${entry.id}.pdf`,
+      );
+      if (result === 'saved') {
+        Alert.alert('Saved', 'The receipt PDF was saved to your selected folder.');
+      }
     } catch {
       Alert.alert('Could not create PDF', 'Please try again.');
     } finally {
