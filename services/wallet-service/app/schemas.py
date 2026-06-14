@@ -42,11 +42,23 @@ class DepositRequest(BaseModel):
 class StatementEntry(BaseModel):
     id: int
     transaction_type: str
-    amount: Decimal
+    amount: Decimal  # in THIS wallet's currency
+    currency: str  # this wallet's currency
     direction: str  # 'credit' or 'debit' relative to this wallet
     status: str
     description: str | None
     created_at: datetime
+    completed_at: datetime | None
+    # Who the money went to / came from (None for deposits).
+    counterparty_name: str | None
+    counterparty_wallet_id: int | None
+    # The absolute transfer, both sides — lets the detail view show a
+    # cross-currency conversion regardless of which side this wallet is on.
+    from_amount: Decimal | None
+    from_currency: str | None
+    to_amount: Decimal | None
+    to_currency: str | None
+    exchange_rate: Decimal | None
 
     model_config = {"from_attributes": True}
 

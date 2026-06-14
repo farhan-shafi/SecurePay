@@ -112,10 +112,11 @@ def statement(
 
     entries: list[StatementEntry] = []
     for tx in rows:
+        is_deposit = tx.transaction_type == "deposit"
         # Money is a credit (incoming) if it landed in this wallet: either a
         # top-up/deposit, or a transfer where we're the recipient. Anything else
         # recorded against our own wallet_id (e.g. a p2p we sent) is a debit.
-        received = tx.recipient_wallet_id == wallet.id or tx.transaction_type == "deposit"
+        received = tx.recipient_wallet_id == wallet.id or is_deposit
         # The amount is always shown in THIS wallet's currency: when we received
         # a cross-currency transfer, that's `recipient_amount` (what we were
         # credited); otherwise it's `amount` (what we sent or deposited).
@@ -123,15 +124,48 @@ def statement(
             shown_amount = tx.recipient_amount
         else:
             shown_amount = tx.amount
+
+        counterparty_name = None
+        counterparty_wallet_id = None
+        from_amount = from_currency = to_amount = to_currency = None
+        if not is_deposit:
+            sender_wallet = db.get(Wallet, tx.wallet_id)
+            recipient_wallet = (
+                db.get(Wallet, tx.recipient_wallet_id)
+                if tx.recipient_wallet_id
+                else None
+            )
+            # The "other" party is whichever wallet isn't ours.
+            other = recipient_wallet if tx.wallet_id == wallet.id else sender_wallet
+            if other is not None:
+                counterparty_wallet_id = other.id
+                owner = db.get(User, other.user_id)
+                counterparty_name = (
+                    f"{owner.first_name} {owner.last_name}" if owner else None
+                )
+            from_amount = tx.amount
+            from_currency = sender_wallet.currency if sender_wallet else None
+            to_amount = tx.recipient_amount if tx.recipient_amount is not None else tx.amount
+            to_currency = recipient_wallet.currency if recipient_wallet else from_currency
+
         entries.append(
             StatementEntry(
                 id=tx.id,
                 transaction_type=tx.transaction_type,
                 amount=shown_amount,
+                currency=wallet.currency,
                 direction="credit" if received else "debit",
                 status=tx.status,
                 description=tx.description,
                 created_at=tx.created_at,
+                completed_at=tx.completed_at,
+                counterparty_name=counterparty_name,
+                counterparty_wallet_id=counterparty_wallet_id,
+                from_amount=from_amount,
+                from_currency=from_currency,
+                to_amount=to_amount,
+                to_currency=to_currency,
+                exchange_rate=tx.exchange_rate,
             )
         )
     return entries
