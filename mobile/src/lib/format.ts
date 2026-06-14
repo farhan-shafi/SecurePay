@@ -61,3 +61,16 @@ export function humanize(value: string): string {
 export function initials(first: string, last: string): string {
   return `${first?.[0] ?? ''}${last?.[0] ?? ''}`.toUpperCase() || '?';
 }
+
+/** A human title for a statement entry: who it was to/from, or the note. */
+export function statementTitle(e: {
+  transaction_type: string;
+  direction: 'credit' | 'debit';
+  description: string | null;
+  counterparty_name: string | null;
+}): string {
+  if (e.transaction_type === 'deposit') return e.description?.trim() || 'Top-up';
+  const who = e.counterparty_name?.trim();
+  if (who) return e.direction === 'credit' ? `From ${who}` : `To ${who}`;
+  return e.description?.trim() || humanize(e.transaction_type);
+}

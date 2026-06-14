@@ -98,10 +98,19 @@ export interface StatementEntry {
   id: number;
   transaction_type: string;
   amount: string;
+  currency: string;
   direction: 'credit' | 'debit';
   status: string;
   description: string | null;
   created_at: string;
+  completed_at: string | null;
+  counterparty_name: string | null;
+  counterparty_wallet_id: number | null;
+  from_amount: string | null;
+  from_currency: string | null;
+  to_amount: string | null;
+  to_currency: string | null;
+  exchange_rate: string | null;
 }
 
 export interface TransactionOut {

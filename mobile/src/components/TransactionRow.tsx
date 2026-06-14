@@ -3,30 +3,31 @@
  * amount is green (+) for credits and dark (−) for debits, and the status pill
  * surfaces anything that isn't a plain completed transfer.
  */
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { colors, font, radius, spacing } from '@/theme/tokens';
-import { formatDateTime, formatMoney, humanize } from '@/lib/format';
+import { formatDateTime, formatMoney, statementTitle } from '@/lib/format';
 import type { StatementEntry } from '@/lib/api';
 import { StatusPill } from './StatusPill';
 
 export function TransactionRow({
   entry,
   currency = 'USD',
+  onPress,
 }: {
   entry: StatementEntry;
   currency?: string;
+  onPress?: () => void;
 }) {
   const credit = entry.direction === 'credit';
   const sign = credit ? '+' : '−';
+  const title = statementTitle(entry);
 
-  const title =
-    entry.description?.trim() ||
-    (credit ? 'Money in' : 'Money out') + ` · ${humanize(entry.transaction_type)}`;
+  const Container = onPress ? Pressable : View;
 
   return (
-    <View style={styles.row}>
+    <Container style={styles.row} onPress={onPress}>
       <View
         style={[
           styles.icon,
@@ -61,7 +62,7 @@ export function TransactionRow({
           <StatusPill status={entry.status} />
         )}
       </View>
-    </View>
+    </Container>
   );
 }
 

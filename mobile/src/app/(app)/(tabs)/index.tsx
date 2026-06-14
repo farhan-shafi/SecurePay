@@ -141,7 +141,11 @@ export default function Home() {
           recent.map((entry, i) => (
             <View key={entry.id}>
               {i > 0 && <View style={styles.divider} />}
-              <TransactionRow entry={entry} currency={wallet.data?.currency} />
+              <TransactionRow
+                entry={entry}
+                currency={wallet.data?.currency}
+                onPress={() => router.push(`/(app)/transaction/${entry.id}`)}
+              />
             </View>
           ))
         )}
