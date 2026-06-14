@@ -32,10 +32,14 @@ export function useProfile() {
   return useQuery({ queryKey: keys.me, queryFn: api.me });
 }
 
-export function useVerifyIdentity() {
+export function useStartVerification() {
+  return useMutation({ mutationFn: api.startVerification });
+}
+
+export function useConfirmVerification() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: api.verifyIdentity,
+    mutationFn: (code: string) => api.confirmVerification(code),
     onSuccess: (user) => qc.setQueryData(keys.me, user),
   });
 }

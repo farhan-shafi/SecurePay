@@ -142,6 +142,12 @@ export interface Lookup {
   currency: string;
 }
 
+export interface VerifyStart {
+  phone_masked: string;
+  expires_in: number;
+  dev_code: string; // demo only — normally delivered by SMS
+}
+
 export interface RegisterPayload {
   email: string;
   phone_number: string;
@@ -167,7 +173,12 @@ export const api = {
 
   me: () => request<User>('GET', '/api/users/me'),
 
-  verifyIdentity: () => request<User>('POST', '/api/users/me/verify'),
+  // Identity verification (phone OTP)
+  startVerification: () =>
+    request<VerifyStart>('POST', '/api/users/me/verify/start'),
+
+  confirmVerification: (code: string) =>
+    request<User>('POST', '/api/users/me/verify/confirm', { code }),
 
   createWallet: (currency: string) =>
     request<Wallet>('POST', '/api/wallets/create', { currency }),

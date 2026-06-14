@@ -3,7 +3,8 @@
  * user's profile and wallet details, and is where Sign out lives.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { Alert, ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
 import { Card } from '@/components/Card';
@@ -12,24 +13,15 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { currencyMeta } from '@/lib/currencies';
 import { formatDateTime, initials } from '@/lib/format';
 import { useAuth } from '@/lib/auth';
-import { useProfile, useVerifyIdentity, useWallet } from '@/lib/queries';
+import { useProfile, useWallet } from '@/lib/queries';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
 export default function Settings() {
+  const router = useRouter();
   const { signOut } = useAuth();
   const profile = useProfile();
   const wallet = useWallet();
-  const verify = useVerifyIdentity();
   const u = profile.data;
-
-  const onVerify = () => {
-    verify.mutate(undefined, {
-      onSuccess: () =>
-        Alert.alert('Identity verified', 'Your account is now verified.'),
-      onError: () =>
-        Alert.alert('Verification failed', 'Please try again in a moment.'),
-    });
-  };
 
   return (
     <View style={styles.flex}>
@@ -69,15 +61,10 @@ export default function Settings() {
                   </Text>
                 ) : (
                   <Pressable
-                    onPress={onVerify}
-                    disabled={verify.isPending}
+                    onPress={() => router.push('/(app)/verify-identity')}
                     style={styles.verifyBtn}
                   >
-                    {verify.isPending ? (
-                      <ActivityIndicator size="small" color={colors.onBrand} />
-                    ) : (
-                      <Text style={styles.verifyText}>Verify now</Text>
-                    )}
+                    <Text style={styles.verifyText}>Verify now</Text>
                   </Pressable>
                 )}
               </View>
