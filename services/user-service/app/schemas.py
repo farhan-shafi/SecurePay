@@ -33,3 +33,17 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class VerifyStartOut(BaseModel):
+    """Response to starting identity verification: where we 'sent' the code."""
+
+    phone_masked: str
+    expires_in: int
+    # DEMO ONLY: in production the code is delivered by SMS and never returned
+    # here. We surface it so the flow is completable without an SMS provider.
+    dev_code: str
+
+
+class VerifyConfirmRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=8)

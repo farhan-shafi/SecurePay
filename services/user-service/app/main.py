@@ -1,10 +1,22 @@
-"""User service: registration, login (JWT issuance), and profile lookup."""
+"""User service: registration, login (JWT issuance), profile, and a phone-OTP
+identity-verification (mock KYC) flow."""
 
+import random
+
+import redis
 from fastapi import Depends, FastAPI, HTTPException, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from app.schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut
+from app.schemas import (
+    LoginRequest,
+    RegisterRequest,
+    TokenResponse,
+    UserOut,
+    VerifyConfirmRequest,
+    VerifyStartOut,
+)
+from shared.config import settings
 from shared.database import get_db
 from shared.models import User
 from shared.security import (
@@ -16,6 +28,21 @@ from shared.security import (
 )
 
 app = FastAPI(title="SecurePay User Service")
+
+# One-time codes live in Redis with a TTL, so they expire on their own — exactly
+# what you want for an OTP. We reuse the stack's Redis (also used by the gateway).
+_redis = redis.from_url(settings.redis_url, decode_responses=True)
+OTP_TTL_SECONDS = 300  # 5 minutes
+
+
+def _otp_key(user_id: int) -> str:
+    return f"kyc_otp:{user_id}"
+
+
+def _mask_phone(phone: str) -> str:
+    """Hide all but the last 4 chars, e.g. +13330000123 -> ••••••••0123."""
+    visible = phone[-4:]
+    return "•" * max(0, len(phone) - 4) + visible
 
 
 @app.get("/health")
@@ -75,20 +102,59 @@ def me(
     return user
 
 
-@app.post("/me/verify", response_model=UserOut)
-def verify_identity(
+@app.post("/me/verify/start", response_model=VerifyStartOut)
+def verify_start(
     user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)
 ):
-    """Mock KYC: instantly mark the user as identity-verified.
+    """Begin identity verification by sending a one-time code to the user's phone.
 
-    A real flow would collect an ID document + selfie and verify them with a KYC
-    provider (e.g. Onfido/Persona) asynchronously. For this capstone we simulate
-    instant approval so the verified state is reachable end to end.
+    A real system would hand the code to an SMS provider (e.g. Twilio) for
+    delivery. Here we generate it, stash it in Redis with a 5-minute expiry, log
+    it, and return it as `dev_code` so the demo is completable without SMS.
     """
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if user.kyc_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Already verified"
+        )
+
+    code = f"{random.randint(0, 999999):06d}"
+    _redis.setex(_otp_key(user_id), OTP_TTL_SECONDS, code)
+    # In production: send `code` to user.phone_number via an SMS provider.
+    print(f"[KYC] verification code for user {user_id} ({user.phone_number}): {code}")
+
+    return VerifyStartOut(
+        phone_masked=_mask_phone(user.phone_number),
+        expires_in=OTP_TTL_SECONDS,
+        dev_code=code,
+    )
+
+
+@app.post("/me/verify/confirm", response_model=UserOut)
+def verify_confirm(
+    payload: VerifyConfirmRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Finish verification by checking the code. Marks the user verified on match."""
+    stored = _redis.get(_otp_key(user_id))
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your code expired. Request a new one.",
+        )
+    if payload.code.strip() != stored:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect code."
+        )
+
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     user.kyc_verified = True
     db.commit()
     db.refresh(user)
+    _redis.delete(_otp_key(user_id))
     return user
