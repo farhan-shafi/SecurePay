@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TransactionRow } from '@/components/TransactionRow';
 import { ApiError } from '@/lib/api';
-import { buildStatementHtml, savePdf } from '@/lib/pdf';
+import { buildStatementHtml, presentPdf } from '@/lib/pdf';
 import { useProfile, useStatement, useWallet } from '@/lib/queries';
 import { colors, font, radius, shadow, spacing } from '@/theme/tokens';
 
@@ -55,7 +55,7 @@ export default function Statement() {
     }
     setDownloading(true);
     try {
-      const result = await savePdf(
+      const result = await presentPdf(
         buildStatementHtml(data, profile.data, wallet.data ?? undefined, rangeLabel),
         'securepay-statement.pdf',
       );

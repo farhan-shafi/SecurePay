@@ -13,7 +13,7 @@ import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { formatDateTime, formatMoney, humanize } from '@/lib/format';
-import { buildReceiptHtml, savePdf } from '@/lib/pdf';
+import { buildReceiptHtml, presentPdf } from '@/lib/pdf';
 import { useProfile, useStatement } from '@/lib/queries';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
@@ -58,7 +58,7 @@ export default function TransactionDetail() {
   const onSave = async () => {
     setSaving(true);
     try {
-      const result = await savePdf(
+      const result = await presentPdf(
         buildReceiptHtml(entry, profile.data),
         `receipt-TXN-${entry.id}.pdf`,
       );

@@ -5,7 +5,7 @@
  * file; expo-sharing then opens the share sheet so the user can "Save to Files",
  * AirDrop, email it, etc. Keeping it as HTML means the layout is easy to style.
  */
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 // SDK 54 moved these file ops to the legacy entry point (the new default API is
@@ -144,7 +144,7 @@ export function buildReceiptHtml(e: StatementEntry, user: User | undefined): str
 
 export type SaveResult = 'saved' | 'shared' | 'cancelled';
 
-async function share(uri: string, fileName: string): Promise<SaveResult> {
+async function shareUri(uri: string, fileName: string): Promise<SaveResult> {
   if (await Sharing.isAvailableAsync()) {
     await Sharing.shareAsync(uri, {
       mimeType: 'application/pdf',
@@ -156,27 +156,38 @@ async function share(uri: string, fileName: string): Promise<SaveResult> {
   return 'cancelled';
 }
 
+async function saveUriToFolder(uri: string, fileName: string): Promise<SaveResult> {
+  const perm = await SAF.requestDirectoryPermissionsAsync();
+  if (!perm.granted) return 'cancelled'; // user backed out of the folder picker
+  const base64 = await readAsStringAsync(uri, { encoding: EncodingType.Base64 });
+  const destUri = await SAF.createFileAsync(
+    perm.directoryUri,
+    fileName.replace(/\.pdf$/i, ''),
+    'application/pdf',
+  );
+  await writeAsStringAsync(destUri, base64, { encoding: EncodingType.Base64 });
+  return 'saved';
+}
+
 /**
- * Render `html` to a PDF and let the user keep it.
- *  - Android: open the system folder picker and write the file there (a real
- *    "download" to e.g. Downloads). Falls back to the share sheet if they cancel.
- *  - iOS: the share sheet, whose "Save to Files" is the native way to save.
+ * Render `html` to a PDF and offer the user BOTH options:
+ *  - Android: a chooser — "Save to device" (writes to a folder they pick) or
+ *    "Share" (the share sheet).
+ *  - iOS: the share sheet, which already offers "Save to Files" *and* sharing.
  */
-export async function savePdf(html: string, fileName: string): Promise<SaveResult> {
+export async function presentPdf(html: string, fileName: string): Promise<SaveResult> {
   const { uri } = await Print.printToFileAsync({ html });
 
-  if (Platform.OS === 'android') {
-    const perm = await SAF.requestDirectoryPermissionsAsync();
-    if (!perm.granted) return share(uri, fileName); // user backed out of the picker
-    const base64 = await readAsStringAsync(uri, { encoding: EncodingType.Base64 });
-    const destUri = await SAF.createFileAsync(
-      perm.directoryUri,
-      fileName.replace(/\.pdf$/i, ''),
-      'application/pdf',
-    );
-    await writeAsStringAsync(destUri, base64, { encoding: EncodingType.Base64 });
-    return 'saved';
-  }
+  if (Platform.OS !== 'android') return shareUri(uri, fileName);
 
-  return share(uri, fileName);
+  return new Promise<SaveResult>((resolve) => {
+    Alert.alert('Export PDF', 'Save it to your device or share it.', [
+      {
+        text: 'Save to device',
+        onPress: () => saveUriToFolder(uri, fileName).then(resolve),
+      },
+      { text: 'Share', onPress: () => shareUri(uri, fileName).then(resolve) },
+      { text: 'Cancel', style: 'cancel', onPress: () => resolve('cancelled') },
+    ]);
+  });
 }
