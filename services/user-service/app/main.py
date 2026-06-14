@@ -73,3 +73,22 @@ def me(
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
+
+
+@app.post("/me/verify", response_model=UserOut)
+def verify_identity(
+    user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)
+):
+    """Mock KYC: instantly mark the user as identity-verified.
+
+    A real flow would collect an ID document + selfie and verify them with a KYC
+    provider (e.g. Onfido/Persona) asynchronously. For this capstone we simulate
+    instant approval so the verified state is reachable end to end.
+    """
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.kyc_verified = True
+    db.commit()
+    db.refresh(user)
+    return user
