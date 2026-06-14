@@ -72,8 +72,19 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
     clearTimeout(timer);
   }
 
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: unknown = null;
+  try {
+    const text = await res.text();
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    // The body wasn't JSON — almost always a tunnel interstitial / HTML error
+    // page rather than our API. Surface a clear message instead of crashing.
+    throw new ApiError(
+      res.status || 0,
+      null,
+      'Unexpected response from the server. Is the backend reachable?',
+    );
+  }
 
   if (!res.ok) {
     // A 401 on a request we *sent a token with* means that token is no longer
