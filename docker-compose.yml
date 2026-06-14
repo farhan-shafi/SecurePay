@@ -106,7 +106,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET: ${JWT_SECRET}
-      # Email (Brevo) — sends the verification OTP. Empty key = log only.
+      # Email (Resend preferred, Brevo fallback) — verification OTP. No key = log.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       EMAIL_SENDER: ${EMAIL_SENDER:-}
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-SecurePay}
@@ -176,7 +177,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       RABBITMQ_URL: amqp://${RABBITMQ_USER:-securepay}:${RABBITMQ_PASSWORD:-securepay_dev_password}@rabbitmq:5672/
-      # Email (Brevo) — sends transaction notifications. Empty key = log only.
+      # Email (Resend preferred, Brevo fallback) — transaction emails. No key = log.
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
       BREVO_API_KEY: ${BREVO_API_KEY:-}
       EMAIL_SENDER: ${EMAIL_SENDER:-}
       EMAIL_SENDER_NAME: ${EMAIL_SENDER_NAME:-SecurePay}
