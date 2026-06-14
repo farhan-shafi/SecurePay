@@ -160,9 +160,10 @@ export interface Lookup {
 }
 
 export interface VerifyStart {
-  phone_masked: string;
+  masked_destination: string; // masked email we sent the code to
+  channel: string; // "email"
   expires_in: number;
-  dev_code: string; // demo only — normally delivered by SMS
+  dev_code: string | null; // set only when no real email could be sent
 }
 
 export interface RegisterPayload {

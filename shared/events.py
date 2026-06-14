@@ -58,21 +58,31 @@ def _reset() -> None:
 
 
 def publish_event(routing_key: str, payload: dict) -> None:
-    """Publish a JSON event. Best-effort — never raises to the caller."""
+    """Publish a JSON event. Best-effort — never raises to the caller.
+
+    We try twice: a long-lived connection can go stale (RabbitMQ drops idle
+    connections) and that only surfaces *during* the publish. So if the first
+    attempt fails we drop the connection, reconnect, and retry once — that way an
+    idle connection never silently loses an event.
+    """
     body = json.dumps(payload).encode()
+    properties = pika.BasicProperties(
+        content_type="application/json",
+        delivery_mode=2,  # persist the message to disk
+    )
     with _lock:
-        try:
-            if _channel is None or _channel.is_closed:
-                _connect()
-            _channel.basic_publish(
-                exchange=EXCHANGE,
-                routing_key=routing_key,
-                body=body,
-                properties=pika.BasicProperties(
-                    content_type="application/json",
-                    delivery_mode=2,  # persist the message to disk
-                ),
-            )
-        except Exception:  # noqa: BLE001 - publishing must never break the caller
-            log.exception("Failed to publish '%s' event", routing_key)
-            _reset()  # drop the bad connection so the next publish reconnects
+        for attempt in (1, 2):
+            try:
+                if _channel is None or _channel.is_closed:
+                    _connect()
+                _channel.basic_publish(
+                    exchange=EXCHANGE,
+                    routing_key=routing_key,
+                    body=body,
+                    properties=properties,
+                )
+                return  # success
+            except Exception:  # noqa: BLE001 - publishing must never break the caller
+                _reset()  # drop the bad connection; attempt 2 reconnects fresh
+                if attempt == 2:
+                    log.exception("Failed to publish '%s' event", routing_key)

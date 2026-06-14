@@ -36,13 +36,14 @@ class TokenResponse(BaseModel):
 
 
 class VerifyStartOut(BaseModel):
-    """Response to starting identity verification: where we 'sent' the code."""
+    """Response to starting identity verification: where we sent the code."""
 
-    phone_masked: str
+    masked_destination: str  # where we emailed it, masked (e.g. f••••n@gmail.com)
+    channel: str  # "email"
     expires_in: int
-    # DEMO ONLY: in production the code is delivered by SMS and never returned
-    # here. We surface it so the flow is completable without an SMS provider.
-    dev_code: str
+    # Fallback only: set when no real email could be sent (e.g. no API key), so
+    # the flow is still completable. Null when a real email went out.
+    dev_code: str | None
 
 
 class VerifyConfirmRequest(BaseModel):

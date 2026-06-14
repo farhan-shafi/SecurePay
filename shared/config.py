@@ -45,5 +45,13 @@ class Settings(BaseSettings):
     exchange_rate_api_url: str = "https://open.er-api.com/v6/latest"
     exchange_rate_cache_ttl_seconds: int = 3600
 
+    # Email (Brevo transactional API). If brevo_api_key is empty, the app falls
+    # back to just logging the email instead of sending it — so the project runs
+    # fine without a key, and really sends once a key is set.
+    brevo_api_key: str = ""
+    brevo_api_url: str = "https://api.brevo.com/v3/smtp/email"
+    email_sender: str = "no-reply@securepay.local"
+    email_sender_name: str = "SecurePay"
+
 
 settings = Settings()

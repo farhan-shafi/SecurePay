@@ -18,6 +18,7 @@ from app.schemas import (
 )
 from shared.config import settings
 from shared.database import get_db
+from shared.email import send_email
 from shared.models import User
 from shared.security import (
     create_access_token,
@@ -39,10 +40,14 @@ def _otp_key(user_id: int) -> str:
     return f"kyc_otp:{user_id}"
 
 
-def _mask_phone(phone: str) -> str:
-    """Hide all but the last 4 chars, e.g. +13330000123 -> ••••••••0123."""
-    visible = phone[-4:]
-    return "•" * max(0, len(phone) - 4) + visible
+def _mask_email(email: str) -> str:
+    """Keep the first/last letter of the name part, e.g. farhan@x.com -> f••••n@x.com."""
+    local, _, domain = email.partition("@")
+    if len(local) <= 2:
+        masked = (local[:1] or "•") + "•"
+    else:
+        masked = local[0] + "•" * (len(local) - 2) + local[-1]
+    return f"{masked}@{domain}"
 
 
 @app.get("/health")
@@ -122,13 +127,24 @@ def verify_start(
 
     code = f"{random.randint(0, 999999):06d}"
     _redis.setex(_otp_key(user_id), OTP_TTL_SECONDS, code)
-    # In production: send `code` to user.phone_number via an SMS provider.
-    print(f"[KYC] verification code for user {user_id} ({user.phone_number}): {code}")
+
+    html = (
+        f"<p>Hi {user.first_name},</p>"
+        f"<p>Your SecurePay verification code is:</p>"
+        f"<p style='font-size:30px;font-weight:bold;letter-spacing:4px'>{code}</p>"
+        f"<p>It expires in 5 minutes. If you didn't request this, ignore this email.</p>"
+    )
+    email_sent = send_email(
+        user.email, "Your SecurePay verification code", html, to_name=user.first_name
+    )
+    print(f"[KYC] code for user {user_id} ({user.email}): {code} (email_sent={email_sent})")
 
     return VerifyStartOut(
-        phone_masked=_mask_phone(user.phone_number),
+        masked_destination=_mask_email(user.email),
+        channel="email",
         expires_in=OTP_TTL_SECONDS,
-        dev_code=code,
+        # Only reveal the code in-app when we couldn't actually email it.
+        dev_code=None if email_sent else code,
     )
 
 

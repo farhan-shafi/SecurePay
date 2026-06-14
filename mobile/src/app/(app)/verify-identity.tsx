@@ -24,7 +24,7 @@ export default function VerifyIdentity() {
   const confirm = useConfirmVerification();
 
   const [code, setCode] = useState('');
-  const [phoneMasked, setPhoneMasked] = useState('');
+  const [destination, setDestination] = useState('');
   const [devCode, setDevCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +33,7 @@ export default function VerifyIdentity() {
     setCode('');
     start.mutate(undefined, {
       onSuccess: (d) => {
-        setPhoneMasked(d.phone_masked);
+        setDestination(d.masked_destination);
         setDevCode(d.dev_code);
       },
       onError: (e) =>
@@ -73,9 +73,9 @@ export default function VerifyIdentity() {
           </View>
           <Text style={styles.title}>Confirm it's you</Text>
           <Text style={styles.subtitle}>
-            {start.isPending && !phoneMasked
-              ? 'Sending a code to your phone…'
-              : `Enter the 6-digit code we sent to ${phoneMasked || 'your phone'}.`}
+            {start.isPending && !destination
+              ? 'Emailing a code to you…'
+              : `Enter the 6-digit code we emailed to ${destination || 'your email'}.`}
           </Text>
         </View>
 

@@ -20,6 +20,7 @@ import pika
 
 from shared.config import settings
 from shared.database import SessionLocal
+from shared.email import send_email
 from shared.events import EXCHANGE
 from shared.models import Notification, Wallet
 
@@ -36,21 +37,30 @@ BINDING_KEY = "transaction.*"
 
 
 def _notify(db, wallet_id: int, message: str, transaction_id: int) -> None:
-    """Create one notification row for the user who owns `wallet_id`."""
+    """Email the user who owns `wallet_id` and record the notification."""
     wallet = db.get(Wallet, wallet_id)
     if wallet is None or wallet.user is None:
         return
+    user = wallet.user
+    html = (
+        f"<p>Hi {user.first_name},</p>"
+        f"<p>{message}</p>"
+        f"<p style='color:#6B6E86'>Reference: TXN-{transaction_id}</p>"
+        f"<p style='color:#6B6E86'>— SecurePay</p>"
+    )
+    # Best-effort send (never raises); we record the row regardless.
+    sent = send_email(user.email, "SecurePay — transaction update", html, to_name=user.first_name)
     db.add(
         Notification(
-            user_id=wallet.user_id,
+            user_id=user.id,
             channel="email",
-            destination=wallet.user.email,
+            destination=user.email,
             message=message,
             transaction_id=transaction_id,
-            status="sent",
+            status="sent" if sent else "logged",
         )
     )
-    log.info("email -> %s: %s", wallet.user.email, message)
+    log.info("email -> %s: %s (sent=%s)", user.email, message, sent)
 
 
 def _handle_transaction_completed(payload: dict) -> None:
