@@ -35,6 +35,10 @@ type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
   let res: Response;
+  // Abort the request if it hangs, so the UI fails fast instead of spinning
+  // forever when the backend isn't reachable (e.g. phone not on the LAN).
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
       method,
@@ -43,14 +47,18 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
       body: body != null ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
     });
   } catch {
-    // fetch only rejects on network failure (server down, wrong IP, no wifi).
+    // Rejects on network failure or the 20s timeout above (server down, wrong
+    // IP, phone not on the same network as the backend).
     throw new ApiError(
       0,
       null,
-      "Can't reach the server. Is the backend running and on the same network?",
+      "Can't reach the server. Check your connection, or set EXPO_PUBLIC_API_URL.",
     );
+  } finally {
+    clearTimeout(timer);
   }
 
   const text = await res.text();
