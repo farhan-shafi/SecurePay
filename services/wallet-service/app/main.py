@@ -3,7 +3,7 @@ and manage saved beneficiaries (payees)."""
 
 from datetime import datetime, timezone
 
-from fastapi import Body, Depends, FastAPI, HTTPException, status
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -12,6 +12,7 @@ from app.schemas import (
     BeneficiaryOut,
     CreateWalletRequest,
     DepositRequest,
+    LookupOut,
     StatementEntry,
     WalletOut,
 )
@@ -134,6 +135,57 @@ def statement(
             )
         )
     return entries
+
+
+# --- Look up a person (before saving them or sending) ----------------------
+
+@app.get("/lookup", response_model=LookupOut)
+def lookup(
+    email: str | None = Query(default=None),
+    wallet_id: int | None = Query(default=None),
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Resolve someone by email or wallet id to their name + wallet currency, so
+    the app can show who they are before the user adds them or sends money."""
+    if email:
+        owner = db.scalar(select(User).where(User.email == email.strip().lower()))
+        if owner is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No account with that email.",
+            )
+        wallet = db.scalar(select(Wallet).where(Wallet.user_id == owner.id))
+        if wallet is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That person hasn't created a wallet yet.",
+            )
+    elif wallet_id is not None:
+        wallet = db.get(Wallet, wallet_id)
+        if wallet is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No wallet with that id.",
+            )
+        owner = db.get(User, wallet.user_id)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Provide an email or a wallet id.",
+        )
+
+    if wallet.user_id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That's your own account.",
+        )
+
+    return LookupOut(
+        wallet_id=wallet.id,
+        name=f"{owner.first_name} {owner.last_name}" if owner else "Unknown",
+        currency=wallet.currency,
+    )
 
 
 # --- Beneficiaries (saved payees) ------------------------------------------

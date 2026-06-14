@@ -63,3 +63,12 @@ class BeneficiaryOut(BaseModel):
     nickname: str | None
     currency: str
     created_at: datetime
+
+
+class LookupOut(BaseModel):
+    """Result of resolving a person by email or wallet id, before deciding to
+    save them as a payee or send them money."""
+
+    wallet_id: int
+    name: str
+    currency: str
