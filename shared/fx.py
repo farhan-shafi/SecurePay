@@ -20,6 +20,18 @@ from shared.config import settings
 # The currencies a wallet may use. Small and explicit on purpose.
 ALLOWED_CURRENCIES: tuple[str, ...] = ("USD", "EUR", "GBP", "PKR")
 
+CURRENCY_SYMBOLS = {"USD": "$", "EUR": "€", "GBP": "£", "PKR": "₨"}
+
+
+def format_money(amount, currency: str) -> str:
+    """Format an amount with its currency symbol, e.g. (25, 'GBP') -> '£25.00'."""
+    try:
+        value = Decimal(str(amount))
+    except Exception:  # noqa: BLE001 - never let formatting crash a notification
+        value = Decimal("0")
+    symbol = CURRENCY_SYMBOLS.get(currency, f"{currency} ")
+    return f"{symbol}{value:,.2f}"
+
 _client = httpx.Client(timeout=5.0)
 # base_currency -> (fetched_at_epoch, {quote_currency: rate})
 _cache: dict[str, tuple[float, dict[str, float]]] = {}

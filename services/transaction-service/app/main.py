@@ -216,7 +216,8 @@ def transfer(
             "transaction_id": tx.id,
             "sender_wallet_id": sender_id,
             "recipient_wallet_id": recipient_id,
-            "amount": str(payload.amount),
+            "amount": str(payload.amount),  # what the sender paid (sender currency)
+            "recipient_amount": str(recipient_amount),  # what the recipient got
         },
     )
     return tx

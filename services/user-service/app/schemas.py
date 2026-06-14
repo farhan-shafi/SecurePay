@@ -48,3 +48,13 @@ class VerifyStartOut(BaseModel):
 
 class VerifyConfirmRequest(BaseModel):
     code: str = Field(min_length=4, max_length=8)
+
+
+class EmailChangeStartRequest(BaseModel):
+    new_email: EmailStr
+
+
+class EmailChangeStartOut(BaseModel):
+    masked_destination: str  # the NEW email, masked
+    expires_in: int
+    dev_code: str | None  # set only when no real email could be sent

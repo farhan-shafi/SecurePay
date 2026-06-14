@@ -9,6 +9,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.schemas import (
+    EmailChangeStartOut,
+    EmailChangeStartRequest,
     LoginRequest,
     RegisterRequest,
     TokenResponse,
@@ -38,6 +40,13 @@ OTP_TTL_SECONDS = 300  # 5 minutes
 
 def _otp_key(user_id: int) -> str:
     return f"kyc_otp:{user_id}"
+
+
+EMAIL_CHANGE_TTL_SECONDS = 600  # 10 minutes
+
+
+def _email_change_key(user_id: int) -> str:
+    return f"email_change:{user_id}"
 
 
 def _mask_email(email: str) -> str:
@@ -173,4 +182,80 @@ def verify_confirm(
     db.commit()
     db.refresh(user)
     _redis.delete(_otp_key(user_id))
+    return user
+
+
+@app.post("/me/email/change/start", response_model=EmailChangeStartOut)
+def email_change_start(
+    payload: EmailChangeStartRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Start changing the email: send a code to the NEW address to prove the user
+    owns it. The change only takes effect once that code is confirmed."""
+    new_email = payload.new_email.strip().lower()
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if new_email == user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="That's already your email."
+        )
+    if db.scalar(select(User).where(User.email == new_email)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="That email is already in use."
+        )
+
+    code = f"{random.randint(0, 999999):06d}"
+    # Stash the code AND the pending new email together, with a 10-minute expiry.
+    _redis.setex(_email_change_key(user_id), EMAIL_CHANGE_TTL_SECONDS, f"{code}:{new_email}")
+
+    html = (
+        f"<p>Hi {user.first_name},</p>"
+        f"<p>Use this code to confirm <b>{new_email}</b> as your new SecurePay email:</p>"
+        f"<p style='font-size:30px;font-weight:bold;letter-spacing:4px'>{code}</p>"
+        f"<p>It expires in 10 minutes. If you didn't request this, ignore this email.</p>"
+    )
+    email_sent = send_email(new_email, "Confirm your new SecurePay email", html, to_name=user.first_name)
+    print(f"[EMAIL-CHANGE] user {user_id} -> {new_email}: {code} (email_sent={email_sent})")
+
+    return EmailChangeStartOut(
+        masked_destination=_mask_email(new_email),
+        expires_in=EMAIL_CHANGE_TTL_SECONDS,
+        dev_code=None if email_sent else code,
+    )
+
+
+@app.post("/me/email/change/confirm", response_model=UserOut)
+def email_change_confirm(
+    payload: VerifyConfirmRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Finish the email change: verify the code, then update the email."""
+    stored = _redis.get(_email_change_key(user_id))
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Your code expired. Start the email change again.",
+        )
+    code, _, new_email = stored.partition(":")
+    if payload.code.strip() != code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect code."
+        )
+    # Re-check uniqueness in case someone took the email in the meantime.
+    if db.scalar(select(User).where(User.email == new_email, User.id != user_id)):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="That email is already in use."
+        )
+
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.email = new_email
+    user.kyc_verified = True  # they just proved they own the new email
+    db.commit()
+    db.refresh(user)
+    _redis.delete(_email_change_key(user_id))
     return user

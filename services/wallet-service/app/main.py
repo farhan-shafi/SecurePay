@@ -49,6 +49,16 @@ def create_wallet(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    # Gate: a wallet can only be opened once the user's email is verified.
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not user.kyc_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Please verify your email before creating a wallet.",
+        )
+
     existing = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
     if existing:
         raise HTTPException(

@@ -22,6 +22,7 @@ from shared.config import settings
 from shared.database import SessionLocal
 from shared.email import send_email
 from shared.events import EXCHANGE
+from shared.fx import format_money
 from shared.models import Notification, Wallet
 
 logging.basicConfig(
@@ -36,12 +37,18 @@ QUEUE = "notifications"
 BINDING_KEY = "transaction.*"
 
 
-def _notify(db, wallet_id: int, message: str, transaction_id: int) -> None:
-    """Email the user who owns `wallet_id` and record the notification."""
+def _notify(db, wallet_id: int, amount, verb: str, transaction_id: int) -> None:
+    """Email the user who owns `wallet_id` and record the notification.
+
+    `amount` is formatted in THAT wallet's own currency, so the sender sees what
+    they paid (their currency) and the recipient sees what they got (theirs).
+    """
     wallet = db.get(Wallet, wallet_id)
     if wallet is None or wallet.user is None:
         return
     user = wallet.user
+    money = format_money(amount, wallet.currency)
+    message = f"You {verb} {money}."
     html = (
         f"<p>Hi {user.first_name},</p>"
         f"<p>{message}</p>"
@@ -66,9 +73,11 @@ def _notify(db, wallet_id: int, message: str, transaction_id: int) -> None:
 def _handle_transaction_completed(payload: dict) -> None:
     tx_id = payload["transaction_id"]
     amount = payload["amount"]
+    # For cross-currency transfers the recipient received a converted amount.
+    recipient_amount = payload.get("recipient_amount", amount)
     with SessionLocal() as db:
-        _notify(db, payload["sender_wallet_id"], f"You sent ${amount}.", tx_id)
-        _notify(db, payload["recipient_wallet_id"], f"You received ${amount}.", tx_id)
+        _notify(db, payload["sender_wallet_id"], amount, "sent", tx_id)
+        _notify(db, payload["recipient_wallet_id"], recipient_amount, "received", tx_id)
         db.commit()
 
 
