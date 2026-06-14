@@ -24,7 +24,12 @@ import {
   type ReactNode,
 } from 'react';
 
-import { api, setAuthToken, type RegisterPayload } from './api';
+import {
+  api,
+  setAuthToken,
+  setOnUnauthorized,
+  type RegisterPayload,
+} from './api';
 
 const TOKEN_KEY = 'securepay.access_token';
 
@@ -94,6 +99,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     queryClient.clear();
   }, [queryClient]);
+
+  // If any authenticated request gets a 401 (stale/expired token), sign out.
+  useEffect(() => {
+    setOnUnauthorized(() => {
+      void signOut();
+    });
+    return () => setOnUnauthorized(null);
+  }, [signOut]);
 
   const value = useMemo(
     () => ({ token, loading, signIn, signUp, signOut }),

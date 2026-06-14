@@ -19,6 +19,14 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+// Called when an authenticated request comes back 401 (our token is invalid or
+// expired). The auth layer registers a handler that signs the user out, so a
+// stale token can never leave the app stuck on an empty logged-in screen.
+let onUnauthorized: (() => void) | null = null;
+export function setOnUnauthorized(cb: (() => void) | null) {
+  onUnauthorized = cb;
+}
+
 // --- Error type -------------------------------------------------------------
 export class ApiError extends Error {
   status: number;
@@ -65,6 +73,12 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   const data = text ? JSON.parse(text) : null;
 
   if (!res.ok) {
+    // A 401 on a request we *sent a token with* means that token is no longer
+    // good — sign the user out so they land back on login instead of a broken,
+    // accountless screen.
+    if (res.status === 401 && authToken) {
+      onUnauthorized?.();
+    }
     const detail = (data as { detail?: unknown })?.detail ?? data;
     const message =
       typeof detail === 'string' ? detail : `Request failed (${res.status})`;
