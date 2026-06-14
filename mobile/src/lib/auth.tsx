@@ -6,8 +6,14 @@
  * secure, OS-backed storage). On launch we rehydrate the token so a returning
  * user stays logged in. Whenever the token changes we also push it into the API
  * client (`setAuthToken`) so every request is authenticated.
+ *
+ * On every auth transition (sign in, sign up, sign out) we also wipe the React
+ * Query cache. The cached wallet/statement/profile belong to whoever was logged
+ * in; without clearing, a freshly logged-in account would briefly see the
+ * previous user's data until refetches land.
  */
 import * as SecureStore from 'expo-secure-store';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createContext,
   useCallback,
@@ -34,6 +40,7 @@ interface AuthValue {
 const AuthContext = createContext<AuthValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -52,11 +59,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const persistToken = useCallback(async (value: string) => {
-    await SecureStore.setItemAsync(TOKEN_KEY, value);
-    setAuthToken(value);
-    setToken(value);
-  }, []);
+  const persistToken = useCallback(
+    async (value: string) => {
+      // Drop any previous user's cached data before this account's screens mount.
+      queryClient.clear();
+      await SecureStore.setItemAsync(TOKEN_KEY, value);
+      setAuthToken(value);
+      setToken(value);
+    },
+    [queryClient],
+  );
 
   const signIn = useCallback(
     async (email: string, password: string) => {
@@ -80,7 +92,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     setAuthToken(null);
     setToken(null);
-  }, []);
+    queryClient.clear();
+  }, [queryClient]);
 
   const value = useMemo(
     () => ({ token, loading, signIn, signUp, signOut }),

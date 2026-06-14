@@ -7,6 +7,7 @@ import { type ReactNode } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   View,
@@ -23,6 +24,9 @@ interface ScreenProps {
   /** Apply the top safe-area inset as padding (default true). */
   edgeTop?: boolean;
   contentStyle?: ViewStyle;
+  /** Pull-to-refresh: when both are set, the ScrollView shows a spinner. */
+  refreshing?: boolean;
+  onRefresh?: () => void;
 }
 
 export function Screen({
@@ -30,6 +34,8 @@ export function Screen({
   scroll = true,
   edgeTop = true,
   contentStyle,
+  refreshing,
+  onRefresh,
 }: ScreenProps) {
   const insets = useSafeAreaInsets();
   const padding: ViewStyle = {
@@ -42,6 +48,16 @@ export function Screen({
       contentContainerStyle={[styles.content, padding, contentStyle]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        onRefresh ? (
+          <RefreshControl
+            refreshing={!!refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.brand}
+            colors={[colors.brand]}
+          />
+        ) : undefined
+      }
     >
       {children}
     </ScrollView>

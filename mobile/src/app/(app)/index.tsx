@@ -42,8 +42,17 @@ export default function Home() {
 
   const recent = (statement.data ?? []).slice(0, 4);
 
+  // Pull-to-refresh: pull everything on the dashboard at once.
+  const onRefresh = () => {
+    profile.refetch();
+    wallet.refetch();
+    statement.refetch();
+  };
+  const refreshing =
+    profile.isRefetching || wallet.isRefetching || statement.isRefetching;
+
   return (
-    <Screen>
+    <Screen refreshing={refreshing} onRefresh={onRefresh}>
       {/* Greeting */}
       <View style={styles.greetRow}>
         <View style={styles.greetLeft}>
