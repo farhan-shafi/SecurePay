@@ -52,6 +52,9 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
       method,
       headers: {
         'Content-Type': 'application/json',
+        // localtunnel shows an interstitial page unless this header is present;
+        // it's harmless for any other backend (just an ignored header).
+        'Bypass-Tunnel-Reminder': 'true',
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
       },
       body: body != null ? JSON.stringify(body) : undefined,
