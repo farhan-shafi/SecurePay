@@ -45,6 +45,15 @@ export default function Settings() {
             <Card style={styles.detailCard}>
               <DetailRow icon="mail-outline" label="Email" value={u.email} />
               <Divider />
+              <Pressable
+                style={styles.row}
+                onPress={() => router.push('/(app)/change-email')}
+              >
+                <Ionicons name="create-outline" size={20} color={colors.textSecondary} />
+                <Text style={[styles.rowLabel, styles.grow]}>Change email</Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </Pressable>
+              <Divider />
               <DetailRow icon="call-outline" label="Phone" value={u.phone_number} />
               <Divider />
               {/* Identity — tappable "Verify now" when not yet verified */}
@@ -54,7 +63,7 @@ export default function Settings() {
                   size={20}
                   color={colors.textSecondary}
                 />
-                <Text style={[styles.rowLabel, styles.grow]}>Identity</Text>
+                <Text style={[styles.rowLabel, styles.grow]}>Email verified</Text>
                 {u.kyc_verified ? (
                   <Text style={[styles.rowValueStatic, { color: colors.success }]}>
                     Verified

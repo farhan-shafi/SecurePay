@@ -36,6 +36,7 @@ export default function Home() {
 
   const [depositOpen, setDepositOpen] = useState(false);
 
+  const verified = !!profile.data?.kyc_verified;
   const recent = (statement.data ?? []).slice(0, 4);
 
   // Pull-to-refresh: pull everything on the dashboard at once.
@@ -82,6 +83,22 @@ export default function Home() {
           currency={wallet.data.currency}
           walletId={wallet.data.id}
         />
+      ) : !verified ? (
+        <Card style={styles.verifyCard}>
+          <View style={styles.verifyIcon}>
+            <Ionicons name="mail-unread-outline" size={30} color={colors.warning} />
+          </View>
+          <Text style={styles.createTitle}>Verify your email</Text>
+          <Text style={styles.createText}>
+            Your email isn't verified yet. Verify it to create a wallet and start
+            sending money.
+          </Text>
+          <Button
+            label="Verify email"
+            onPress={() => router.push('/(app)/verify-identity')}
+            style={styles.createBtn}
+          />
+        </Card>
       ) : (
         <Card style={styles.createCard}>
           <Ionicons name="wallet-outline" size={34} color={colors.brand} />
@@ -205,6 +222,20 @@ const styles = StyleSheet.create({
   loading: { height: 188, alignItems: 'center', justifyContent: 'center' },
 
   createCard: { alignItems: 'center', gap: spacing.md },
+  verifyCard: {
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1.5,
+    borderColor: colors.warning,
+  },
+  verifyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.warningSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   createTitle: {
     fontFamily: font.family.bold,
     fontSize: font.size.xl,

@@ -166,6 +166,12 @@ export interface VerifyStart {
   dev_code: string | null; // set only when no real email could be sent
 }
 
+export interface EmailChangeStart {
+  masked_destination: string; // the NEW email, masked
+  expires_in: number;
+  dev_code: string | null;
+}
+
 export interface RegisterPayload {
   email: string;
   phone_number: string;
@@ -197,6 +203,15 @@ export const api = {
 
   confirmVerification: (code: string) =>
     request<User>('POST', '/api/users/me/verify/confirm', { code }),
+
+  // Change email (a code is sent to the NEW address to prove ownership)
+  changeEmailStart: (new_email: string) =>
+    request<EmailChangeStart>('POST', '/api/users/me/email/change/start', {
+      new_email,
+    }),
+
+  changeEmailConfirm: (code: string) =>
+    request<User>('POST', '/api/users/me/email/change/confirm', { code }),
 
   createWallet: (currency: string) =>
     request<Wallet>('POST', '/api/wallets/create', { currency }),

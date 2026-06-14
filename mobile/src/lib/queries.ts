@@ -44,6 +44,18 @@ export function useConfirmVerification() {
   });
 }
 
+export function useChangeEmailStart() {
+  return useMutation({ mutationFn: (email: string) => api.changeEmailStart(email) });
+}
+
+export function useChangeEmailConfirm() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (code: string) => api.changeEmailConfirm(code),
+    onSuccess: (user) => qc.setQueryData(keys.me, user),
+  });
+}
+
 /**
  * The wallet, or `null` if the user hasn't created one yet (the backend 404s on
  * /wallets/me until then — we treat that as "no wallet", not an error).
