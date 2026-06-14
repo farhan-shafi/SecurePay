@@ -39,5 +39,11 @@ class Settings(BaseSettings):
     # still logged for review. See the fraud service for the scoring rules.
     fraud_block_threshold: int = 60
 
+    # Foreign exchange: live rates for cross-currency transfers. open.er-api.com
+    # is free and needs no API key. Fetched rates are cached in-process (see
+    # shared/fx.py) so a burst of transfers doesn't hammer the provider.
+    exchange_rate_api_url: str = "https://open.er-api.com/v6/latest"
+    exchange_rate_cache_ttl_seconds: int = 3600
+
 
 settings = Settings()

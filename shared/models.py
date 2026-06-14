@@ -17,6 +17,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -72,9 +73,18 @@ class Transaction(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"), index=True)
     transaction_type: Mapped[str] = mapped_column(String(50))  # 'p2p', 'deposit'
-    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))
+    amount: Mapped[Decimal] = mapped_column(Numeric(15, 2))  # debited, in sender's currency
     recipient_wallet_id: Mapped[int | None] = mapped_column(
         ForeignKey("wallets.id"), nullable=True
+    )
+    # For cross-currency transfers, the amount actually credited to the
+    # recipient, in the recipient's currency, and the rate used (recipient units
+    # per 1 sender unit). Null/equal-to-amount when both wallets share a currency.
+    recipient_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(15, 2), nullable=True
+    )
+    exchange_rate: Mapped[Decimal | None] = mapped_column(
+        Numeric(18, 8), nullable=True
     )
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -88,6 +98,33 @@ class Transaction(Base):
     )
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+
+
+class Beneficiary(Base):
+    """A payee a user has saved so they can send to them by name.
+
+    Like a bank's saved-payees list: instead of typing a wallet id every time,
+    the user adds a beneficiary once (by wallet id) and we resolve the owner's
+    real name from their account. `nickname` is an optional user-set label
+    ("Mum", "Rent"). A user can't save the same wallet twice (unique pair).
+    """
+
+    __tablename__ = "beneficiaries"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_user_id", "wallet_id", name="uq_beneficiary_owner_wallet"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"))
+    nickname: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
     )
 
 

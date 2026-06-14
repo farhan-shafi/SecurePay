@@ -8,11 +8,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.schemas import P2PRequest, TransactionOut
+from app.schemas import P2PRequest, QuoteOut, TransactionOut
+from shared import fx
 from shared.config import settings
 from shared.database import get_db
 from shared.events import publish_event
@@ -60,9 +61,57 @@ def _fraud_check(sender_wallet_id: int, amount: Decimal, recipient_wallet_id: in
         )
 
 
+def _convert_for_transfer(amount, sender_currency: str, recipient_currency: str):
+    """Return (recipient_amount, rate) for a transfer, converting if currencies
+    differ. Raises 503 if a cross-currency rate can't be fetched — we never move
+    money at the wrong value."""
+    if sender_currency == recipient_currency:
+        return amount, Decimal("1")
+    try:
+        return fx.convert(amount, sender_currency, recipient_currency)
+    except fx.RateUnavailable:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Exchange rate unavailable right now. Please try again shortly.",
+        )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "transaction-service"}
+
+
+@app.get("/quote", response_model=QuoteOut)
+def quote(
+    recipient_wallet_id: int = Query(...),
+    amount: Decimal = Query(..., gt=0),
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Preview a transfer: how much the recipient receives in their currency.
+    Lets the app show the conversion before the user commits to sending."""
+    sender = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
+    if sender is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Sender has no wallet"
+        )
+    recipient = db.get(Wallet, recipient_wallet_id)
+    if recipient is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Recipient wallet not found"
+        )
+    amount = amount.quantize(Decimal("0.01"))
+    recipient_amount, rate = _convert_for_transfer(
+        amount, sender.currency, recipient.currency
+    )
+    return QuoteOut(
+        amount=amount,
+        currency=sender.currency,
+        recipient_amount=recipient_amount,
+        recipient_currency=recipient.currency,
+        exchange_rate=rate,
+        same_currency=sender.currency == recipient.currency,
+    )
 
 
 @app.post("/p2p", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
@@ -107,6 +156,13 @@ def transfer(
     #    blocked transfer raises 403 here and never debits the sender.
     _fraud_check(sender.id, payload.amount, recipient.id)
 
+    # 2b. Work out the conversion BEFORE taking locks, so we never hold row
+    #     locks during the (possibly slow) exchange-rate fetch. The recipient is
+    #     credited in their own currency; same-currency transfers use rate 1.
+    recipient_amount, rate = _convert_for_transfer(
+        payload.amount, sender.currency, recipient.currency
+    )
+
     # 3. Lock both wallet rows. We lock in a deterministic order (lowest id
     #    first) so two opposite transfers can never deadlock each other.
     first_id, second_id = sorted((sender.id, recipient.id))
@@ -128,14 +184,17 @@ def transfer(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient funds"
         )
 
-    # 5. Move the money and record it, all in one commit.
+    # 5. Move the money and record it, all in one commit. The sender is debited
+    #    in their currency; the recipient is credited the converted amount.
     sender.balance -= payload.amount
-    recipient.balance += payload.amount
+    recipient.balance += recipient_amount
     tx = Transaction(
         wallet_id=sender.id,
         transaction_type="p2p",
         amount=payload.amount,
         recipient_wallet_id=recipient.id,
+        recipient_amount=recipient_amount,
+        exchange_rate=rate,
         status="completed",
         description=payload.description,
         idempotency_key=payload.idempotency_key,

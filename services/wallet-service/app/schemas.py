@@ -1,7 +1,9 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from shared.fx import ALLOWED_CURRENCIES
 
 
 class WalletOut(BaseModel):
@@ -13,6 +15,22 @@ class WalletOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CreateWalletRequest(BaseModel):
+    # The currency the wallet holds. Defaults to USD so an empty POST (as the
+    # smoke test sends) still works.
+    currency: str = "USD"
+
+    @field_validator("currency")
+    @classmethod
+    def _allowed(cls, v: str) -> str:
+        v = v.upper()
+        if v not in ALLOWED_CURRENCIES:
+            raise ValueError(
+                f"currency must be one of {', '.join(ALLOWED_CURRENCIES)}"
+            )
+        return v
 
 
 class DepositRequest(BaseModel):
@@ -31,3 +49,17 @@ class StatementEntry(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class AddBeneficiaryRequest(BaseModel):
+    wallet_id: int
+    nickname: str | None = Field(default=None, max_length=100)
+
+
+class BeneficiaryOut(BaseModel):
+    id: int
+    wallet_id: int
+    name: str  # the payee's real name, resolved from their account
+    nickname: str | None
+    currency: str
+    created_at: datetime
