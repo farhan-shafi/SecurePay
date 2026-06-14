@@ -102,9 +102,13 @@ export default function AddBeneficiary() {
                 onChangeText={setQuery}
                 placeholder="name@example.com  or  2"
                 autoCapitalize="none"
+                autoCorrect={false}
                 keyboardType="email-address"
                 onSubmitEditing={onFind}
               />
+              <Text style={styles.hint}>
+                Enter the person's email, or their wallet id (e.g. 2).
+              </Text>
               {error ? <Text style={styles.error}>{error}</Text> : null}
             </Card>
             <Button label="Find" onPress={onFind} loading={finding} />
@@ -158,7 +162,13 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     lineHeight: 22,
   },
-  form: { gap: spacing.lg },
+  form: { gap: spacing.sm },
+  hint: {
+    fontFamily: font.family.regular,
+    fontSize: font.size.sm,
+    color: colors.textMuted,
+    marginLeft: spacing.xs,
+  },
   found: {
     flexDirection: 'row',
     alignItems: 'center',
