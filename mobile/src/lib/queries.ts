@@ -14,7 +14,9 @@ import {
 import {
   ApiError,
   api,
+  type Beneficiary,
   type P2PPayload,
+  type Quote,
   type StatementEntry,
   type Wallet,
 } from './api';
@@ -23,6 +25,7 @@ export const keys = {
   me: ['me'] as const,
   wallet: ['wallet'] as const,
   statement: ['statement'] as const,
+  beneficiaries: ['beneficiaries'] as const,
 };
 
 export function useProfile() {
@@ -57,8 +60,32 @@ export function useStatement() {
 export function useCreateWallet() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: api.createWallet,
+    mutationFn: (currency: string) => api.createWallet(currency),
     onSuccess: (wallet) => qc.setQueryData(keys.wallet, wallet),
+  });
+}
+
+export function useBeneficiaries() {
+  return useQuery<Beneficiary[]>({
+    queryKey: keys.beneficiaries,
+    queryFn: api.listBeneficiaries,
+  });
+}
+
+export function useAddBeneficiary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ walletId, nickname }: { walletId: number; nickname?: string }) =>
+      api.addBeneficiary(walletId, nickname),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.beneficiaries }),
+  });
+}
+
+export function useDeleteBeneficiary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteBeneficiary(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.beneficiaries }),
   });
 }
 
@@ -70,6 +97,16 @@ export function useDeposit() {
       qc.setQueryData(keys.wallet, wallet);
       qc.invalidateQueries({ queryKey: keys.statement });
     },
+  });
+}
+
+/** Live preview of a (possibly cross-currency) transfer. `enabled` should be
+ *  false until the amount is a valid positive number. */
+export function useQuote(recipientWalletId: number, amount: string, enabled: boolean) {
+  return useQuery<Quote>({
+    queryKey: ['quote', recipientWalletId, amount],
+    queryFn: () => api.getQuote(recipientWalletId, amount),
+    enabled,
   });
 }
 

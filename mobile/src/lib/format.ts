@@ -8,6 +8,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
   USD: '$',
   EUR: '€',
   GBP: '£',
+  PKR: '₨',
 };
 
 /** 1234.5 -> "$1,234.50" */

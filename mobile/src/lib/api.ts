@@ -110,10 +110,30 @@ export interface TransactionOut {
   transaction_type: string;
   amount: string;
   recipient_wallet_id: number | null;
+  recipient_amount: string | null;
+  exchange_rate: string | null;
   status: string;
   description: string | null;
   created_at: string;
   completed_at: string | null;
+}
+
+export interface Beneficiary {
+  id: number;
+  wallet_id: number;
+  name: string;
+  nickname: string | null;
+  currency: string;
+  created_at: string;
+}
+
+export interface Quote {
+  amount: string;
+  currency: string;
+  recipient_amount: string;
+  recipient_currency: string;
+  exchange_rate: string;
+  same_currency: boolean;
 }
 
 export interface RegisterPayload {
@@ -141,7 +161,8 @@ export const api = {
 
   me: () => request<User>('GET', '/api/users/me'),
 
-  createWallet: () => request<Wallet>('POST', '/api/wallets/create'),
+  createWallet: (currency: string) =>
+    request<Wallet>('POST', '/api/wallets/create', { currency }),
 
   getWallet: () => request<Wallet>('GET', '/api/wallets/me'),
 
@@ -153,4 +174,24 @@ export const api = {
 
   sendP2P: (body: P2PPayload) =>
     request<TransactionOut>('POST', '/api/transactions/p2p', body),
+
+  // Beneficiaries (saved payees)
+  listBeneficiaries: () =>
+    request<Beneficiary[]>('GET', '/api/wallets/me/beneficiaries'),
+
+  addBeneficiary: (wallet_id: number, nickname?: string) =>
+    request<Beneficiary>('POST', '/api/wallets/me/beneficiaries', {
+      wallet_id,
+      nickname,
+    }),
+
+  deleteBeneficiary: (id: number) =>
+    request<null>('DELETE', `/api/wallets/me/beneficiaries/${id}`),
+
+  // Preview a (possibly cross-currency) transfer before sending.
+  getQuote: (recipientWalletId: number, amount: string) =>
+    request<Quote>(
+      'GET',
+      `/api/transactions/quote?recipient_wallet_id=${recipientWalletId}&amount=${encodeURIComponent(amount)}`,
+    ),
 };

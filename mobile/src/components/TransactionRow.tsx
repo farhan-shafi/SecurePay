@@ -11,7 +11,13 @@ import { formatDateTime, formatMoney, humanize } from '@/lib/format';
 import type { StatementEntry } from '@/lib/api';
 import { StatusPill } from './StatusPill';
 
-export function TransactionRow({ entry }: { entry: StatementEntry }) {
+export function TransactionRow({
+  entry,
+  currency = 'USD',
+}: {
+  entry: StatementEntry;
+  currency?: string;
+}) {
   const credit = entry.direction === 'credit';
   const sign = credit ? '+' : '−';
 
@@ -49,7 +55,7 @@ export function TransactionRow({ entry }: { entry: StatementEntry }) {
           ]}
         >
           {sign}
-          {formatMoney(entry.amount)}
+          {formatMoney(entry.amount, currency)}
         </Text>
         {entry.status.toLowerCase() !== 'completed' && (
           <StatusPill status={entry.status} />

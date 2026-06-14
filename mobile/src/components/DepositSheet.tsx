@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from './Button';
 import { TextField } from './TextField';
 import { ApiError } from '@/lib/api';
+import { currencyMeta } from '@/lib/currencies';
 import { useDeposit } from '@/lib/queries';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
@@ -26,10 +27,13 @@ const QUICK = ['50', '100', '500'];
 export function DepositSheet({
   visible,
   onClose,
+  currency = 'USD',
 }: {
   visible: boolean;
   onClose: () => void;
+  currency?: string;
 }) {
+  const symbol = currencyMeta(currency).symbol;
   const insets = useSafeAreaInsets();
   const deposit = useDeposit();
   const [amount, setAmount] = useState('');
@@ -76,6 +80,7 @@ export function DepositSheet({
           <TextField
             label="Amount"
             money
+            adornment={symbol}
             value={amount}
             onChangeText={setAmount}
             placeholder="0.00"
@@ -93,7 +98,10 @@ export function DepositSheet({
                   setError(null);
                 }}
               >
-                <Text style={styles.chipText}>${q}</Text>
+                <Text style={styles.chipText}>
+                  {symbol}
+                  {q}
+                </Text>
               </Pressable>
             ))}
           </View>

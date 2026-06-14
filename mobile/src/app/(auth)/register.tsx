@@ -42,7 +42,7 @@ export default function Register() {
         phone_number: phone.trim(),
         password,
       });
-      router.replace('/(app)');
+      router.replace('/(app)/(tabs)');
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : 'Something went wrong. Try again.',

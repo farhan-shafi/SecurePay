@@ -1,21 +1,24 @@
 /**
- * Send money (P2P). Enter a recipient wallet id, amount and optional note, then
- * transfer. We generate a fresh idempotency key per attempt so an accidental
- * double-tap can't double-send, while a deliberate second transfer still works.
- * A 403 here is the fraud service blocking the transfer — we surface its reason.
+ * Send money to a saved payee (reached by tapping one in the Payees list).
+ * Shows your balance, what you'll have left, and — when the payee holds a
+ * different currency — a live conversion of what they'll actually receive.
+ * A fresh idempotency key per attempt makes an accidental double-tap safe.
  */
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 
+import { Avatar } from '@/components/Avatar';
 import { Button } from '@/components/Button';
 import { Card } from '@/components/Card';
 import { Screen } from '@/components/Screen';
+import { ScreenHeader } from '@/components/ScreenHeader';
 import { TextField } from '@/components/TextField';
 import { ApiError } from '@/lib/api';
+import { currencyMeta } from '@/lib/currencies';
 import { formatMoney } from '@/lib/format';
-import { useSendMoney, useWallet } from '@/lib/queries';
+import { useQuote, useSendMoney, useWallet } from '@/lib/queries';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
 function newIdempotencyKey() {
@@ -24,105 +27,177 @@ function newIdempotencyKey() {
 
 export default function Send() {
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    walletId: string;
+    name: string;
+    currency: string;
+  }>();
+  const recipientWalletId = Number(params.walletId);
+  const payeeName = params.name ?? 'Payee';
+  const payeeCurrency = params.currency ?? 'USD';
+
   const wallet = useWallet();
   const send = useSendMoney();
 
-  const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState('');
+  const [debounced, setDebounced] = useState('');
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [sentAmount, setSentAmount] = useState<string | null>(null);
+  const [sent, setSent] = useState<{ amount: string; recipient: string | null } | null>(
+    null,
+  );
 
-  const reset = () => {
-    setRecipient('');
-    setAmount('');
-    setNote('');
-    setError(null);
-    setSentAmount(null);
-    send.reset();
-  };
+  const myCurrency = wallet.data?.currency ?? 'USD';
+  const crossCurrency = !!wallet.data && myCurrency !== payeeCurrency;
+  const balance = Number(wallet.data?.balance ?? 0);
+  const amountNum = Number(amount);
+  const amountValid = isFinite(amountNum) && amountNum > 0;
+  const leftAfter = balance - (amountValid ? amountNum : 0);
+
+  // Debounce the amount before asking the backend for a conversion quote.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(amount), 400);
+    return () => clearTimeout(t);
+  }, [amount]);
+
+  const debNum = Number(debounced);
+  const quote = useQuote(
+    recipientWalletId,
+    isFinite(debNum) ? debNum.toFixed(2) : '0',
+    crossCurrency && isFinite(debNum) && debNum > 0,
+  );
 
   const onSend = async () => {
     setError(null);
-    const id = Number(recipient);
-    const value = Number(amount);
-    if (!Number.isInteger(id) || id <= 0) {
-      setError('Enter a valid recipient wallet id.');
-      return;
-    }
-    if (!isFinite(value) || value <= 0) {
+    if (!amountValid) {
       setError('Enter an amount greater than 0.');
       return;
     }
+    if (amountNum > balance) {
+      setError("That's more than your balance.");
+      return;
+    }
     try {
-      await send.mutateAsync({
-        recipient_wallet_id: id,
-        amount: value.toFixed(2),
+      const tx = await send.mutateAsync({
+        recipient_wallet_id: recipientWalletId,
+        amount: amountNum.toFixed(2),
         description: note.trim() || undefined,
         idempotency_key: newIdempotencyKey(),
       });
-      setSentAmount(value.toFixed(2));
+      setSent({ amount: amountNum.toFixed(2), recipient: tx.recipient_amount });
     } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : 'Transfer failed. Try again.',
-      );
+      setError(err instanceof ApiError ? err.message : 'Transfer failed. Try again.');
     }
   };
 
-  // Success state
-  if (sentAmount) {
+  // --- Success state ---
+  if (sent) {
     return (
-      <Screen scroll={false} contentStyle={styles.successWrap}>
-        <View style={styles.successIcon}>
-          <Ionicons name="checkmark" size={48} color={colors.onBrand} />
-        </View>
-        <Text style={styles.successAmount}>{formatMoney(sentAmount)}</Text>
-        <Text style={styles.successText}>
-          Sent to wallet #{recipient}
-          {note.trim() ? `\n“${note.trim()}”` : ''}
-        </Text>
-        <View style={styles.successButtons}>
-          <Button
-            label="View activity"
-            variant="secondary"
-            onPress={() => {
-              reset();
-              router.push('/(app)/activity');
-            }}
-          />
-          <Button label="Send again" onPress={reset} />
-        </View>
-      </Screen>
+      <View style={styles.flex}>
+        <ScreenHeader title="Sent" />
+        <Screen scroll={false} edgeTop={false} contentStyle={styles.successWrap}>
+          <View style={styles.successIcon}>
+            <Ionicons name="checkmark" size={48} color={colors.onBrand} />
+          </View>
+          <Text style={styles.successAmount}>{formatMoney(sent.amount, myCurrency)}</Text>
+          <Text style={styles.successText}>
+            Sent to {payeeName}
+            {crossCurrency && sent.recipient
+              ? `\nThey received ${formatMoney(sent.recipient, payeeCurrency)}`
+              : ''}
+          </Text>
+          <View style={styles.successButtons}>
+            <Button
+              label="View statement"
+              variant="secondary"
+              onPress={() => router.replace('/(app)/(tabs)/statement')}
+            />
+            <Button label="Done" onPress={() => router.back()} />
+          </View>
+        </Screen>
+      </View>
     );
   }
 
+  const payeeMeta = currencyMeta(payeeCurrency);
+
   return (
-    <Screen>
-      <Text style={styles.title}>Send money</Text>
+    <View style={styles.flex}>
+      <ScreenHeader title="Send money" />
+      <Screen edgeTop={false}>
+        {/* Payee */}
+        <Card style={styles.payee}>
+          <Avatar label={payeeName.trim()[0]?.toUpperCase() ?? '?'} size={46} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.payeeName} numberOfLines={1}>
+              {payeeName}
+            </Text>
+            <Text style={styles.payeeSub}>
+              {payeeMeta.flag} {payeeCurrency} · wallet #{recipientWalletId}
+            </Text>
+          </View>
+        </Card>
 
-      <Card style={styles.balanceChip}>
-        <Text style={styles.balanceLabel}>Your balance</Text>
-        <Text style={styles.balanceValue}>
-          {wallet.data ? formatMoney(wallet.data.balance, wallet.data.currency) : '—'}
-        </Text>
-      </Card>
+        {/* Balance */}
+        <View style={styles.balanceRow}>
+          <Text style={styles.balanceLabel}>Your balance</Text>
+          <Text style={styles.balanceValue}>
+            {wallet.data ? formatMoney(wallet.data.balance, myCurrency) : '—'}
+          </Text>
+        </View>
 
-      <View style={styles.form}>
         <TextField
-          label="Recipient wallet id"
-          value={recipient}
-          onChangeText={setRecipient}
-          placeholder="e.g. 2"
-          keyboardType="number-pad"
-        />
-        <TextField
-          label="Amount"
+          label={`Amount (${myCurrency})`}
           money
+          adornment={currencyMeta(myCurrency).symbol}
           value={amount}
           onChangeText={setAmount}
           placeholder="0.00"
           keyboardType="decimal-pad"
         />
+
+        {/* Left-after + conversion */}
+        {amountValid ? (
+          <Card style={styles.summary}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>You'll have left</Text>
+              <Text
+                style={[
+                  styles.summaryValue,
+                  leftAfter < 0 && { color: colors.danger },
+                ]}
+              >
+                {formatMoney(leftAfter, myCurrency)}
+              </Text>
+            </View>
+
+            {crossCurrency ? (
+              <>
+                <View style={styles.summaryDivider} />
+                {quote.isFetching ? (
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Getting live rate…</Text>
+                    <ActivityIndicator color={colors.brand} size="small" />
+                  </View>
+                ) : quote.data ? (
+                  <>
+                    <View style={styles.summaryRow}>
+                      <Text style={styles.summaryLabel}>{payeeName} receives</Text>
+                      <Text style={[styles.summaryValue, { color: colors.success }]}>
+                        ≈ {formatMoney(quote.data.recipient_amount, payeeCurrency)}
+                      </Text>
+                    </View>
+                    <Text style={styles.rateNote}>
+                      1 {myCurrency} = {Number(quote.data.exchange_rate).toFixed(4)}{' '}
+                      {payeeCurrency} · live rate
+                    </Text>
+                  </>
+                ) : null}
+              </>
+            ) : null}
+          </Card>
+        ) : null}
+
         <TextField
           label="Note (optional)"
           value={note}
@@ -145,27 +220,32 @@ export default function Send() {
           disabled={!wallet.data}
           style={styles.cta}
         />
-        {!wallet.data ? (
-          <Text style={styles.hint}>Create a wallet on the Home tab first.</Text>
-        ) : null}
-      </View>
-    </Screen>
+      </Screen>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  title: {
-    fontFamily: font.family.bold,
-    fontSize: font.size.xxxl,
+  flex: { flex: 1, backgroundColor: colors.bg },
+
+  payee: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  payeeName: {
+    fontFamily: font.family.semibold,
+    fontSize: font.size.lg,
     color: colors.textPrimary,
-    letterSpacing: -0.5,
-    marginTop: spacing.sm,
   },
-  balanceChip: {
+  payeeSub: {
+    fontFamily: font.family.regular,
+    fontSize: font.size.sm,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+
+  balanceRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing.lg,
+    paddingHorizontal: spacing.xs,
   },
   balanceLabel: {
     fontFamily: font.family.medium,
@@ -174,17 +254,34 @@ const styles = StyleSheet.create({
   },
   balanceValue: {
     fontFamily: font.family.bold,
-    fontSize: font.size.xl,
+    fontSize: font.size.lg,
     color: colors.textPrimary,
   },
-  form: { gap: spacing.lg },
-  cta: { marginTop: spacing.sm },
-  hint: {
-    fontFamily: font.family.regular,
-    fontSize: font.size.sm,
-    color: colors.textMuted,
-    textAlign: 'center',
+
+  summary: { gap: spacing.sm },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
+  summaryLabel: {
+    fontFamily: font.family.medium,
+    fontSize: font.size.md,
+    color: colors.textSecondary,
+  },
+  summaryValue: {
+    fontFamily: font.family.semibold,
+    fontSize: font.size.md,
+    color: colors.textPrimary,
+  },
+  summaryDivider: { height: 1, backgroundColor: colors.border },
+  rateNote: {
+    fontFamily: font.family.regular,
+    fontSize: font.size.xs,
+    color: colors.textMuted,
+  },
+
+  cta: { marginTop: spacing.sm },
   errorBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -201,7 +298,12 @@ const styles = StyleSheet.create({
   },
 
   // success
-  successWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.lg },
+  successWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.lg,
+  },
   successIcon: {
     width: 96,
     height: 96,
@@ -222,9 +324,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
   },
-  successButtons: {
-    alignSelf: 'stretch',
-    gap: spacing.md,
-    marginTop: spacing.xl,
-  },
+  successButtons: { alignSelf: 'stretch', gap: spacing.md, marginTop: spacing.xl },
 });

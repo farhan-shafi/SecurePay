@@ -1,5 +1,5 @@
 /**
- * Activity — the full transaction statement, newest first, with pull-to-refresh.
+ * Statement — the full transaction history, newest first, with pull-to-refresh.
  * Uses a FlatList (not the shared Screen ScrollView) so a long history stays
  * smooth and we get a native RefreshControl.
  */
@@ -16,12 +16,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TransactionRow } from '@/components/TransactionRow';
 import { ApiError } from '@/lib/api';
-import { useStatement } from '@/lib/queries';
+import { useStatement, useWallet } from '@/lib/queries';
 import { colors, font, radius, shadow, spacing } from '@/theme/tokens';
 
-export default function Activity() {
+export default function Statement() {
   const insets = useSafeAreaInsets();
   const statement = useStatement();
+  const wallet = useWallet();
   const data = statement.data ?? [];
 
   return (
@@ -41,11 +42,11 @@ export default function Activity() {
             tintColor={colors.brand}
           />
         }
-        ListHeaderComponent={<Text style={styles.title}>Activity</Text>}
+        ListHeaderComponent={<Text style={styles.title}>Statement</Text>}
         ItemSeparatorComponent={() => <View style={styles.divider} />}
         renderItem={({ item }) => (
           <View style={styles.rowWrap}>
-            <TransactionRow entry={item} />
+            <TransactionRow entry={item} currency={wallet.data?.currency} />
           </View>
         )}
         ListEmptyComponent={

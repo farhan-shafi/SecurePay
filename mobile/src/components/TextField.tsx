@@ -18,14 +18,17 @@ import { colors, font, radius, spacing } from '@/theme/tokens';
 interface TextFieldProps extends ComponentProps<typeof TextInput> {
   label: string;
   error?: string | null;
-  /** Render a leading "$" adornment (for amount inputs). */
+  /** Render a leading currency adornment (for amount inputs). */
   money?: boolean;
+  /** Currency symbol shown when `money` is set (defaults to "$"). */
+  adornment?: string;
 }
 
 export function TextField({
   label,
   error,
   money,
+  adornment,
   secureTextEntry,
   style,
   ...rest
@@ -43,7 +46,7 @@ export function TextField({
           error && styles.fieldError,
         ]}
       >
-        {money && <Text style={styles.adornment}>$</Text>}
+        {money && <Text style={styles.adornment}>{adornment ?? '$'}</Text>}
         <TextInput
           {...rest}
           secureTextEntry={hidden}

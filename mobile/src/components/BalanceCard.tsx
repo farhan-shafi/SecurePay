@@ -2,12 +2,16 @@
  * The hero of the home screen: a gradient "card" that shows the available
  * balance. The oversized whole number with smaller cents, the faint decorative
  * circles, and the soft coloured shadow are what give the app its premium feel.
+ * An eye button hides/shows the amount for privacy in public.
  */
-import { StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { colors, font, radius, shadow, spacing } from '@/theme/tokens';
 import { splitMoney } from '@/lib/format';
+import { currencyMeta } from '@/lib/currencies';
 
 export function BalanceCard({
   balance,
@@ -18,7 +22,9 @@ export function BalanceCard({
   currency: string;
   walletId: number;
 }) {
+  const [hidden, setHidden] = useState(false);
   const { whole, cents } = splitMoney(balance, currency);
+  const meta = currencyMeta(currency);
 
   return (
     <LinearGradient
@@ -31,15 +37,37 @@ export function BalanceCard({
       <View style={[styles.blob, styles.blobTop]} />
       <View style={[styles.blob, styles.blobBottom]} />
 
-      <Text style={styles.label}>Available balance</Text>
+      <View style={styles.labelRow}>
+        <Text style={styles.label}>Available balance</Text>
+        <Pressable
+          onPress={() => setHidden((h) => !h)}
+          hitSlop={12}
+          style={styles.eye}
+          accessibilityLabel={hidden ? 'Show balance' : 'Hide balance'}
+        >
+          <Ionicons
+            name={hidden ? 'eye-off-outline' : 'eye-outline'}
+            size={20}
+            color={colors.onBrandDim}
+          />
+        </Pressable>
+      </View>
 
       <View style={styles.amountRow}>
-        <Text style={styles.whole}>{whole}</Text>
-        <Text style={styles.cents}>{cents}</Text>
+        {hidden ? (
+          <Text style={styles.whole}>{meta.symbol}••••••</Text>
+        ) : (
+          <>
+            <Text style={styles.whole}>{whole}</Text>
+            <Text style={styles.cents}>{cents}</Text>
+          </>
+        )}
       </View>
 
       <View style={styles.footer}>
-        <Text style={styles.meta}>SecurePay wallet</Text>
+        <Text style={styles.meta}>
+          {meta.flag} {currency} wallet
+        </Text>
         <View style={styles.chip}>
           <Text style={styles.chipText}>#{walletId}</Text>
         </View>
@@ -73,11 +101,24 @@ const styles = StyleSheet.create({
     bottom: -50,
     left: -30,
   },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   label: {
     fontFamily: font.family.medium,
     fontSize: font.size.sm,
     color: colors.onBrandDim,
     letterSpacing: 0.4,
+  },
+  eye: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -4,
+    marginTop: -4,
   },
   amountRow: {
     flexDirection: 'row',

@@ -1,8 +1,8 @@
 /**
  * Home — the wallet dashboard.
- *  - greeting + sign-out
- *  - the gradient balance card (or a "create wallet" prompt for new users)
- *  - quick actions (Add money / Send / Activity)
+ *  - greeting (tap to open Settings / account details)
+ *  - the gradient balance card with eye toggle (or a "create wallet" prompt)
+ *  - quick actions (Add money / Send / Statement)
  *  - a preview of recent transactions
  */
 import { Ionicons } from '@expo/vector-icons';
@@ -23,20 +23,16 @@ import { Card } from '@/components/Card';
 import { DepositSheet } from '@/components/DepositSheet';
 import { Screen } from '@/components/Screen';
 import { TransactionRow } from '@/components/TransactionRow';
-import { ApiError } from '@/lib/api';
 import { initials } from '@/lib/format';
-import { useAuth } from '@/lib/auth';
-import { useCreateWallet, useProfile, useStatement, useWallet } from '@/lib/queries';
+import { useProfile, useStatement, useWallet } from '@/lib/queries';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
 export default function Home() {
   const router = useRouter();
-  const { signOut } = useAuth();
 
   const profile = useProfile();
   const wallet = useWallet();
   const statement = useStatement();
-  const createWallet = useCreateWallet();
 
   const [depositOpen, setDepositOpen] = useState(false);
 
@@ -53,8 +49,8 @@ export default function Home() {
 
   return (
     <Screen refreshing={refreshing} onRefresh={onRefresh}>
-      {/* Greeting */}
-      <View style={styles.greetRow}>
+      {/* Greeting — tap to open Settings */}
+      <Pressable style={styles.greetRow} onPress={() => router.push('/(app)/settings')}>
         <View style={styles.greetLeft}>
           <Avatar
             label={
@@ -70,10 +66,10 @@ export default function Home() {
             </Text>
           </View>
         </View>
-        <Pressable onPress={signOut} hitSlop={10} style={styles.iconBtn}>
-          <Ionicons name="log-out-outline" size={22} color={colors.textSecondary} />
-        </Pressable>
-      </View>
+        <View style={styles.iconBtn}>
+          <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
+        </View>
+      </Pressable>
 
       {/* Balance / create-wallet */}
       {wallet.isLoading ? (
@@ -91,21 +87,14 @@ export default function Home() {
           <Ionicons name="wallet-outline" size={34} color={colors.brand} />
           <Text style={styles.createTitle}>Create your wallet</Text>
           <Text style={styles.createText}>
-            You need a wallet before you can add or send money. It only takes a tap.
+            You need a wallet before you can add or send money. Pick a currency to
+            get started.
           </Text>
           <Button
             label="Create wallet"
-            loading={createWallet.isPending}
-            onPress={() => createWallet.mutate()}
+            onPress={() => router.push('/(app)/create-wallet')}
             style={styles.createBtn}
           />
-          {createWallet.error ? (
-            <Text style={styles.errorText}>
-              {createWallet.error instanceof ApiError
-                ? createWallet.error.message
-                : 'Could not create wallet.'}
-            </Text>
-          ) : null}
         </Card>
       )}
 
@@ -120,12 +109,12 @@ export default function Home() {
           <QuickAction
             icon={<Ionicons name="paper-plane-outline" size={22} color={colors.brand} />}
             label="Send"
-            onPress={() => router.push('/(app)/send')}
+            onPress={() => router.push('/(app)/(tabs)/beneficiaries')}
           />
           <QuickAction
-            icon={<Ionicons name="time-outline" size={23} color={colors.brand} />}
-            label="Activity"
-            onPress={() => router.push('/(app)/activity')}
+            icon={<Ionicons name="receipt-outline" size={22} color={colors.brand} />}
+            label="Statement"
+            onPress={() => router.push('/(app)/(tabs)/statement')}
           />
         </View>
       ) : null}
@@ -134,7 +123,7 @@ export default function Home() {
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>Recent activity</Text>
         {recent.length > 0 && (
-          <Pressable onPress={() => router.push('/(app)/activity')} hitSlop={8}>
+          <Pressable onPress={() => router.push('/(app)/(tabs)/statement')} hitSlop={8}>
             <Text style={styles.seeAll}>See all</Text>
           </Pressable>
         )}
@@ -152,13 +141,17 @@ export default function Home() {
           recent.map((entry, i) => (
             <View key={entry.id}>
               {i > 0 && <View style={styles.divider} />}
-              <TransactionRow entry={entry} />
+              <TransactionRow entry={entry} currency={wallet.data?.currency} />
             </View>
           ))
         )}
       </Card>
 
-      <DepositSheet visible={depositOpen} onClose={() => setDepositOpen(false)} />
+      <DepositSheet
+        visible={depositOpen}
+        onClose={() => setDepositOpen(false)}
+        currency={wallet.data?.currency}
+      />
     </Screen>
   );
 }
@@ -220,11 +213,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   createBtn: { alignSelf: 'stretch', marginTop: spacing.sm },
-  errorText: {
-    fontFamily: font.family.medium,
-    fontSize: font.size.sm,
-    color: colors.danger,
-  },
 
   actions: { flexDirection: 'row', gap: spacing.md },
   action: {
