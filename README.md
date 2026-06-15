@@ -366,7 +366,7 @@ transaction-service                rabbitmq                 notification-service
 3. **Consume.** The [notification-service](services/notification-service/app/main.py)
    is a **background worker** — not an HTTP server (no port, no uvicorn). It
    blocks in `start_consuming()`, and for each event **sends a real email** to
-   each party (via Brevo — see *Email* below) and writes one row to the
+   each party (via Resend/Brevo — see *Email* below) and writes one row to the
    `notifications` table as the audit trail. The amount is shown in **each
    wallet's own currency**, so the sender sees what they paid and the recipient
    sees the converted amount they received (e.g. `You sent £100.00` /
@@ -472,14 +472,22 @@ a wallet — `wallet-service` returns **403** until then.
   the **new** address; `/me/email/change/confirm` switches it only once that code
   is confirmed — so you can't move your account to an address you don't own.
 
-**Sending email (Brevo).** Both the OTP and the transfer notifications go out as
-real email through [Brevo](https://www.brevo.com)'s transactional API
-([`shared/email.py`](shared/email.py)). It's **best-effort**: a failed send never
-breaks a verification or a payment, and with **no `BREVO_API_KEY` set it simply
-logs** the email instead — so the stack runs fine without credentials. To send
-for real, set `BREVO_API_KEY` + `EMAIL_SENDER` (a verified sender) in `.env`
-(see `.env.example`). SMS is *not* wired up — truly free SMS doesn't exist, so
-the "OTP" is delivered by email rather than phone.
+**Sending email (Resend / Brevo).** Both the OTP and the transfer notifications go
+out as real email from [`shared/email.py`](shared/email.py), which **prefers
+[Resend](https://resend.com)** (set `RESEND_API_KEY`), **falls back to
+[Brevo](https://www.brevo.com)** (`BREVO_API_KEY`), and otherwise just **logs** the
+email — so the stack runs fine without any credentials. It's **best-effort**: a
+failed send never breaks a verification or a payment. Set one provider's key plus
+`EMAIL_SENDER` (an address on a domain you've verified with that provider) in
+`.env` (see `.env.example`).
+
+> **Deliverability (so email doesn't land in spam).** Authenticate your *sending
+> domain* with the provider: **SPF** (add the provider's `include:` to your SPF
+> TXT record), **DKIM** (the CNAME/TXT records the provider gives you), and a
+> **DMARC** record. With all three passing, mailbox providers trust your mail.
+> Sending from a dedicated subdomain (e.g. `send.example.com`) also helps. A
+> brand-new domain still needs a short reputation "warm-up". SMS is *not* wired
+> up — truly free SMS doesn't exist — so the OTP is delivered by email.
 
 ---
 
