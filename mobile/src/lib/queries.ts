@@ -165,3 +165,23 @@ export function useSendMoney() {
     },
   });
 }
+
+export function useBillers() {
+  return useQuery({ queryKey: ['billers'] as const, queryFn: api.listBillers });
+}
+
+export function usePayBill() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      biller_id: number;
+      reference: string;
+      amount: string;
+      idempotency_key?: string;
+    }) => api.payBill(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.wallet });
+      qc.invalidateQueries({ queryKey: keys.statement });
+    },
+  });
+}

@@ -145,8 +145,8 @@ export default function Home() {
           />
           <QuickAction
             icon={<Ionicons name="receipt-outline" size={22} color={colors.brand} />}
-            label="Statement"
-            onPress={() => router.push('/(app)/(tabs)/statement')}
+            label="Bills"
+            onPress={() => router.push('/(app)/pay-bills')}
           />
         </View>
       ) : null}

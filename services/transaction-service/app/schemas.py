@@ -40,3 +40,18 @@ class QuoteOut(BaseModel):
     recipient_currency: str
     exchange_rate: Decimal  # recipient units per 1 sender unit
     same_currency: bool
+
+
+class BillerOut(BaseModel):
+    id: int
+    name: str
+    category: str
+    currency: str  # of the biller's receiving wallet
+
+
+class BillRequest(BaseModel):
+    biller_id: int
+    # The consumer/account number printed on the bill.
+    reference: str = Field(min_length=3, max_length=60)
+    amount: Decimal = Field(gt=0, max_digits=15, decimal_places=2)
+    idempotency_key: str | None = Field(default=None, max_length=255)

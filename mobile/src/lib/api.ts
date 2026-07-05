@@ -278,6 +278,13 @@ export interface FraudLogItem {
   created_at: string;
 }
 
+export interface Biller {
+  id: number;
+  name: string;
+  category: string;
+  currency: string; // of the biller's receiving wallet
+}
+
 export interface RegisterPayload {
   email: string;
   phone_number: string;
@@ -371,6 +378,16 @@ export const api = {
 
   deleteBeneficiary: (id: number) =>
     request<null>('DELETE', `/api/wallets/me/beneficiaries/${id}`),
+
+  // Bill payments
+  listBillers: () => request<Biller[]>('GET', '/api/transactions/billers'),
+
+  payBill: (body: {
+    biller_id: number;
+    reference: string;
+    amount: string;
+    idempotency_key?: string;
+  }) => request<TransactionOut>('POST', '/api/transactions/bill', body),
 
   // Preview a (possibly cross-currency) transfer before sending.
   getQuote: (recipientWalletId: number, amount: string) =>

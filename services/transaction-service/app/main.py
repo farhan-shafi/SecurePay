@@ -14,11 +14,11 @@ from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.schemas import P2PRequest, QuoteOut, TransactionOut
+from app.schemas import BillerOut, BillRequest, P2PRequest, QuoteOut, TransactionOut
 from shared import fx
 from shared.config import settings
 from shared.database import SessionLocal, get_db
-from shared.models import Transaction, Wallet
+from shared.models import Biller, Transaction, Wallet
 from shared.outbox import drain_outbox, record_event
 from shared.security import get_current_user_id
 
@@ -139,18 +139,24 @@ def quote(
     )
 
 
-@app.post("/p2p", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
-def transfer(
-    payload: P2PRequest,
-    user_id: int = Depends(get_current_user_id),
-    db: Session = Depends(get_db),
-):
+def _do_transfer(
+    db: Session,
+    user_id: int,
+    recipient_wallet_id: int,
+    amount: Decimal,
+    description: str | None,
+    idempotency_key: str | None,
+    transaction_type: str = "p2p",
+) -> Transaction:
+    """The one money-movement path. P2P transfers and bill payments both run
+    through here, so locking, FX, fraud screening, idempotency and the outbox
+    event work identically for both."""
     # 1. Idempotency: if we've already processed this key, return the original
     #    transaction instead of creating a second transfer.
-    if payload.idempotency_key:
+    if idempotency_key:
         existing = db.scalar(
             select(Transaction).where(
-                Transaction.idempotency_key == payload.idempotency_key
+                Transaction.idempotency_key == idempotency_key
             )
         )
         if existing:
@@ -162,7 +168,7 @@ def transfer(
             status_code=status.HTTP_404_NOT_FOUND, detail="Sender has no wallet"
         )
 
-    recipient = db.get(Wallet, payload.recipient_wallet_id)
+    recipient = db.get(Wallet, recipient_wallet_id)
     if recipient is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Recipient wallet not found"
@@ -179,13 +185,13 @@ def transfer(
     #    held a FOR UPDATE lock here, that INSERT would block until our httpx
     #    timeout fired (fail-open) and the block would never take effect. A
     #    blocked transfer raises 403 here and never debits the sender.
-    _fraud_check(sender.id, payload.amount, recipient.id)
+    _fraud_check(sender.id, amount, recipient.id)
 
     # 2b. Work out the conversion BEFORE taking locks, so we never hold row
     #     locks during the (possibly slow) exchange-rate fetch. The recipient is
     #     credited in their own currency; same-currency transfers use rate 1.
     recipient_amount, rate = _convert_for_transfer(
-        payload.amount, sender.currency, recipient.currency
+        amount, sender.currency, recipient.currency
     )
 
     # 3. Lock both wallet rows. We lock in a deterministic order (lowest id
@@ -204,25 +210,25 @@ def transfer(
     recipient = locked[recipient.id]
 
     # 4. Re-check funds now that we hold the lock (balance may have changed).
-    if sender.balance < payload.amount:
+    if sender.balance < amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient funds"
         )
 
     # 5. Move the money and record it, all in one commit. The sender is debited
     #    in their currency; the recipient is credited the converted amount.
-    sender.balance -= payload.amount
+    sender.balance -= amount
     recipient.balance += recipient_amount
     tx = Transaction(
         wallet_id=sender.id,
-        transaction_type="p2p",
-        amount=payload.amount,
+        transaction_type=transaction_type,
+        amount=amount,
         recipient_wallet_id=recipient.id,
         recipient_amount=recipient_amount,
         exchange_rate=rate,
         status="completed",
-        description=payload.description,
-        idempotency_key=payload.idempotency_key,
+        description=description,
+        idempotency_key=idempotency_key,
         completed_at=datetime.now(timezone.utc),
     )
     # Capture the ids before commit; afterwards the ORM objects are expired and
@@ -241,7 +247,7 @@ def transfer(
             "transaction_id": tx.id,
             "sender_wallet_id": sender_id,
             "recipient_wallet_id": recipient_id,
-            "amount": str(payload.amount),  # what the sender paid (sender currency)
+            "amount": str(amount),  # what the sender paid (sender currency)
             "recipient_amount": str(recipient_amount),  # what the recipient got
         },
     )
@@ -254,3 +260,51 @@ def transfer(
     except Exception:  # noqa: BLE001 - delivery must never fail the transfer
         pass
     return tx
+
+
+@app.post("/p2p", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
+def transfer(
+    payload: P2PRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    return _do_transfer(
+        db,
+        user_id,
+        payload.recipient_wallet_id,
+        payload.amount,
+        payload.description,
+        payload.idempotency_key,
+    )
+
+
+@app.get("/billers", response_model=list[BillerOut])
+def billers(db: Session = Depends(get_db)):
+    """The bill payees a user can pay (seeded system wallets)."""
+    rows = db.scalars(select(Biller).order_by(Biller.id)).all()
+    return [
+        BillerOut(id=b.id, name=b.name, category=b.category, currency=b.wallet.currency)
+        for b in rows
+    ]
+
+
+@app.post("/bill", response_model=TransactionOut, status_code=status.HTTP_201_CREATED)
+def pay_bill(
+    payload: BillRequest,
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Pay a bill: exactly a transfer into the biller's wallet, with the bill's
+    reference number recorded on the transaction."""
+    biller = db.get(Biller, payload.biller_id)
+    if biller is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Biller not found")
+    return _do_transfer(
+        db,
+        user_id,
+        biller.wallet_id,
+        payload.amount,
+        f"{biller.name} · ref {payload.reference}",
+        payload.idempotency_key,
+        transaction_type="bill",
+    )

@@ -196,3 +196,21 @@ class OutboxEvent(Base):
     sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class Biller(Base):
+    """A payee for bill payments (electricity, internet, ...). Each biller is
+    backed by a system-owned wallet that receives the payments, so a bill
+    payment reuses the exact same money-movement path as a P2P transfer."""
+
+    __tablename__ = "billers"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), unique=True)
+    category: Mapped[str] = mapped_column(String(30))  # electricity / internet / ...
+    wallet_id: Mapped[int] = mapped_column(ForeignKey("wallets.id"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    wallet: Mapped["Wallet"] = relationship()
