@@ -144,5 +144,17 @@ def main() -> None:
     channel.start_consuming()
 
 
+def run_forever() -> None:
+    """Keep the worker alive across broker restarts: if the connection drops
+    (e.g. RabbitMQ restarted), wait a few seconds and reconnect instead of
+    dying. The queue is durable, so no events are lost while we're away."""
+    while True:
+        try:
+            main()
+        except pika.exceptions.AMQPError:
+            log.warning("Broker connection lost; reconnecting in 5s…")
+            time.sleep(5)
+
+
 if __name__ == "__main__":
-    main()
+    run_forever()

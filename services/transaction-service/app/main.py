@@ -4,6 +4,8 @@ The transfer runs inside a single database transaction with both wallet rows
 locked, so the debit and credit either both happen or neither does.
 """
 
+import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -15,16 +17,39 @@ from sqlalchemy.orm import Session
 from app.schemas import P2PRequest, QuoteOut, TransactionOut
 from shared import fx
 from shared.config import settings
-from shared.database import get_db
-from shared.events import publish_event
+from shared.database import SessionLocal, get_db
 from shared.models import Transaction, Wallet
+from shared.outbox import drain_outbox, record_event
 from shared.security import get_current_user_id
 
 # A short-lived client for the synchronous call to the fraud service. The whole
 # transfer is a sync request, so we use httpx's sync client here.
 _fraud_client = httpx.Client(timeout=2.0)
 
-app = FastAPI(title="SecurePay Transaction Service")
+OUTBOX_DRAIN_INTERVAL_SECONDS = 10
+_drainer_stop = threading.Event()
+
+
+def _outbox_drainer() -> None:
+    """Background safety net: retries any outbox events whose immediate publish
+    failed (e.g. the broker was briefly down), every few seconds, forever."""
+    while not _drainer_stop.wait(OUTBOX_DRAIN_INTERVAL_SECONDS):
+        try:
+            with SessionLocal() as db:
+                drain_outbox(db)
+        except Exception:  # noqa: BLE001 - the drainer must never die
+            pass
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    thread = threading.Thread(target=_outbox_drainer, daemon=True, name="outbox-drainer")
+    thread.start()
+    yield
+    _drainer_stop.set()
+
+
+app = FastAPI(title="SecurePay Transaction Service", lifespan=lifespan)
 
 
 def _fraud_check(sender_wallet_id: int, amount: Decimal, recipient_wallet_id: int) -> None:
@@ -204,13 +229,13 @@ def transfer(
     # reading them would trigger a reload.
     sender_id, recipient_id = sender.id, recipient.id
     db.add(tx)
-    db.commit()
-    db.refresh(tx)
+    db.flush()  # assign tx.id so the event row can reference it
 
-    # 6. Announce the completed transfer. This is fire-and-forget: the money has
-    #    already moved, so a broker hiccup must not fail the request (see
-    #    publish_event's best-effort contract). The notification-service reacts.
-    publish_event(
+    # 6. Announce the completed transfer via the OUTBOX: the event is a row in
+    #    the SAME transaction as the transfer, so it can never be lost — if the
+    #    broker is down, the drainer retries until it gets through.
+    record_event(
+        db,
         "transaction.completed",
         {
             "transaction_id": tx.id,
@@ -220,4 +245,12 @@ def transfer(
             "recipient_amount": str(recipient_amount),  # what the recipient got
         },
     )
+    db.commit()
+    db.refresh(tx)
+
+    # Happy path: deliver immediately (failures just wait for the timer).
+    try:
+        drain_outbox(db)
+    except Exception:  # noqa: BLE001 - delivery must never fail the transfer
+        pass
     return tx

@@ -175,3 +175,24 @@ class Notification(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class OutboxEvent(Base):
+    """Transactional outbox: an event recorded in the SAME database transaction
+    as the change it describes (e.g. a transfer), then published to RabbitMQ by
+    a drainer afterwards. If publishing fails the row stays 'pending' and is
+    retried, so a committed transfer can never silently lose its event —
+    at-least-once delivery instead of fire-and-forget."""
+
+    __tablename__ = "outbox_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    routing_key: Mapped[str] = mapped_column(String(100))
+    payload: Mapped[dict] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

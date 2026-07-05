@@ -57,8 +57,10 @@ def _reset() -> None:
     _channel = None
 
 
-def publish_event(routing_key: str, payload: dict) -> None:
-    """Publish a JSON event. Best-effort — never raises to the caller.
+def publish_event(routing_key: str, payload: dict) -> bool:
+    """Publish a JSON event. Never raises; returns True when the broker
+    accepted it (the outbox drainer uses this to know a row is safe to mark
+    sent).
 
     We try twice: a long-lived connection can go stale (RabbitMQ drops idle
     connections) and that only surfaces *during* the publish. So if the first
@@ -81,8 +83,9 @@ def publish_event(routing_key: str, payload: dict) -> None:
                     body=body,
                     properties=properties,
                 )
-                return  # success
+                return True  # success
             except Exception:  # noqa: BLE001 - publishing must never break the caller
                 _reset()  # drop the bad connection; attempt 2 reconnects fresh
                 if attempt == 2:
                     log.exception("Failed to publish '%s' event", routing_key)
+    return False
