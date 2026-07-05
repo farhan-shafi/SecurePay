@@ -16,6 +16,7 @@ gateway).
 """
 
 import json
+import time
 import re
 import subprocess
 import urllib.error
@@ -82,23 +83,27 @@ def send(token, recipient_wallet_id, amount, key):
 
 
 def main():
-    print("Setting up carol (sender) + two recipients (dave, eve)")
-    carol, carol_wallet = setup_user("carol@example.com", "+13330000001")
-    _, dave_wallet = setup_user("dave@example.com", "+13330000002")
-    _, eve_wallet = setup_user("eve@example.com", "+13330000003")
+    # Fresh users + keys per run: on a persistent database, re-using emails and
+    # idempotency keys would just REPLAY the first run's transactions (no new
+    # rows -> the velocity rule never fires and the "block" can't reproduce).
+    run = str(int(time.time()))[-7:]
+    print(f"Setting up carol (sender) + two recipients (dave, eve) [run {run}]")
+    carol, carol_wallet = setup_user(f"carol{run}@example.com", f"+1333{run}1")
+    _, dave_wallet = setup_user(f"dave{run}@example.com", f"+1333{run}2")
+    _, eve_wallet = setup_user(f"eve{run}@example.com", f"+1333{run}3")
 
     print("Funding carol with 10000")
     call("POST", f"{GATEWAY}/api/wallets/me/deposit", {"amount": "10000.00"}, token=carol)
 
     print("\n6 small, normal transfers to dave (these should all be ALLOWED):")
     for i in range(1, 7):
-        status, _ = send(carol, dave_wallet, "10.00", f"fraud-demo-dave-{i}")
+        status, _ = send(carol, dave_wallet, "10.00", f"fraud-demo-{run}-dave-{i}")
         print(f"  transfer {i}: 10.00 -> dave  HTTP {status}")
 
     print("\nNow a large 600.00 transfer to a brand-new recipient (eve).")
     print("Expected signals: high_velocity (6 recent), unusual_amount (>2x avg),")
     print("new_large_recipient (first time, >=500) -> score 75 -> BLOCK.")
-    status, body = send(carol, eve_wallet, "600.00", "fraud-demo-eve-1")
+    status, body = send(carol, eve_wallet, "600.00", f"fraud-demo-{run}-eve-1")
     print(f"  transfer -> eve  HTTP {status}")
     detail = body.get("detail", body) if isinstance(body, dict) else body
     print(f"  response: {json.dumps(detail)}")

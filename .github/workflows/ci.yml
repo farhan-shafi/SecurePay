@@ -1,0 +1,41 @@
+# CI: fast sanity checks on every push/PR (no test suite yet, by choice).
+#  - backend: every service and shared module must at least compile
+#  - compose: docker-compose.yml must be valid
+#  - mobile: TypeScript must typecheck
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile all Python sources
+        run: python -m compileall -q shared services migrations
+      - name: Validate docker-compose.yml
+        run: |
+          cp .env.example .env
+          docker compose config -q
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+      - run: npm ci
+      - name: TypeScript typecheck
+        run: npx tsc --noEmit -p tsconfig.json

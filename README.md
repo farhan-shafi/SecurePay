@@ -352,13 +352,12 @@ transaction-service                rabbitmq                 notification-service
        (does NOT wait for the notification)            row per party, log "email -> …"
 ```
 
-1. **Publish.** After the money moves and the database commit succeeds, the
-   transaction-service calls
-   [`publish_event("transaction.completed", …)`](shared/events.py). This is
-   **fire-and-forget**: if the broker is momentarily down, it logs the failure
-   and moves on — it must *never* reverse or fail a transfer that already
-   happened. (A system needing an at-least-once guarantee would use a
-   *transactional outbox*; that's a deliberate later step.)
+1. **Publish — via a transactional outbox.** The event is written as a ROW in
+   [`outbox_events`](shared/outbox.py) inside the **same database transaction**
+   as the transfer, then a drainer publishes pending rows to RabbitMQ (retrying
+   on a timer if the broker is down) and marks them sent. Either the transfer
+   and its event both commit or neither does — **at-least-once delivery**, so a
+   completed transfer can never silently lose its notification.
 2. **Route.** The event goes to a **topic exchange** named `securepay.events`
    with a routing key like `transaction.completed`. A topic exchange routes by a
    dotted key, so new consumers can subscribe to patterns (the
@@ -536,8 +535,8 @@ image can include both `shared/` and that service's `app/`.
 2. ~~**Alembic migrations** to replace `create_all()`.~~ ✅ Done — see
    *Database schema & migrations* above.
 3. ~~**RabbitMQ + notification-service** for async notifications on completed
-   transfers.~~ ✅ Done — see *Notifications (RabbitMQ)* above. Next here: a
-   transactional outbox for an at-least-once delivery guarantee.
+   transfers.~~ ✅ Done — see *Notifications (RabbitMQ)* above, now with a
+   **transactional outbox** for an at-least-once delivery guarantee.
 4. ~~**Frontend** wired to the gateway.~~ ✅ Done — a **React Native (Expo)**
    mobile app in [`mobile/`](mobile/) (auth, multi-currency wallet, deposit, P2P
    send, statement + PDF). Next here: push notifications and a web build.
