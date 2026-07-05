@@ -90,20 +90,29 @@ export default function Statement() {
           <View style={styles.headerWrap}>
             <View style={styles.titleRow}>
               <Text style={styles.title}>Statement</Text>
-              <Pressable
-                style={styles.downloadBtn}
-                onPress={onDownload}
-                disabled={downloading}
-              >
-                {downloading ? (
-                  <ActivityIndicator size="small" color={colors.brand} />
-                ) : (
-                  <>
-                    <Ionicons name="download-outline" size={16} color={colors.brand} />
-                    <Text style={styles.downloadText}>PDF</Text>
-                  </>
-                )}
-              </Pressable>
+              <View style={styles.titleActions}>
+                <Pressable
+                  style={styles.downloadBtn}
+                  onPress={() => router.push('/(app)/insights')}
+                >
+                  <Ionicons name="stats-chart-outline" size={16} color={colors.brand} />
+                  <Text style={styles.downloadText}>Insights</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.downloadBtn}
+                  onPress={onDownload}
+                  disabled={downloading}
+                >
+                  {downloading ? (
+                    <ActivityIndicator size="small" color={colors.brand} />
+                  ) : (
+                    <>
+                      <Ionicons name="download-outline" size={16} color={colors.brand} />
+                      <Text style={styles.downloadText}>PDF</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
             </View>
             <View style={styles.filters}>
               {RANGES.map((r) => {
@@ -168,6 +177,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  titleActions: { flexDirection: 'row', gap: spacing.sm },
   title: {
     fontFamily: font.family.bold,
     fontSize: font.size.xxxl,

@@ -139,6 +139,11 @@ export default function Home() {
             onPress={() => router.push('/(app)/(tabs)/beneficiaries')}
           />
           <QuickAction
+            icon={<Ionicons name="qr-code-outline" size={22} color={colors.brand} />}
+            label="Receive"
+            onPress={() => router.push('/(app)/receive')}
+          />
+          <QuickAction
             icon={<Ionicons name="receipt-outline" size={22} color={colors.brand} />}
             label="Statement"
             onPress={() => router.push('/(app)/(tabs)/statement')}

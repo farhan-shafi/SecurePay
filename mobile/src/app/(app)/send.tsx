@@ -5,6 +5,7 @@
  * A fresh idempotency key per attempt makes an accidental double-tap safe.
  */
 import { Ionicons } from '@expo/vector-icons';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
@@ -76,6 +77,21 @@ export default function Send() {
     if (amountNum > balance) {
       setError("That's more than your balance.");
       return;
+    }
+    // Confirm it's really the account owner before money moves — Face ID or
+    // fingerprint, with the device passcode as fallback. If the device has no
+    // security enrolled at all, proceed: it's their unlocked phone.
+    const enrolled =
+      (await LocalAuthentication.hasHardwareAsync()) &&
+      (await LocalAuthentication.isEnrolledAsync());
+    if (enrolled) {
+      const auth = await LocalAuthentication.authenticateAsync({
+        promptMessage: `Confirm sending to ${payeeName}`,
+      });
+      if (!auth.success) {
+        setError('Confirmation cancelled — nothing was sent.');
+        return;
+      }
     }
     try {
       const tx = await send.mutateAsync({

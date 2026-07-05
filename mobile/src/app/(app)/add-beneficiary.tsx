@@ -4,8 +4,9 @@
  * the lookup endpoint) so the user always sees who they're about to pay.
  */
 import { Ionicons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
@@ -28,6 +29,40 @@ export default function AddBeneficiary() {
   const [finding, setFinding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [found, setFound] = useState<Lookup | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+  const handledScan = useRef(false); // the camera fires repeatedly; act once
+
+  const openScanner = async () => {
+    setError(null);
+    if (!permission?.granted) {
+      const res = await requestPermission();
+      if (!res.granted) {
+        setError('Camera access is needed to scan a QR code.');
+        return;
+      }
+    }
+    handledScan.current = false;
+    setScanning(true);
+  };
+
+  const onScanned = async (data: string) => {
+    if (handledScan.current) return;
+    // Accept our own payload ("securepay:wallet:<id>") or a bare wallet id.
+    const match = /^securepay:wallet:(\d+)$/.exec(data.trim());
+    const walletId = match ? Number(match[1]) : /^\d+$/.test(data.trim()) ? Number(data.trim()) : null;
+    if (walletId == null) return; // not one of ours — keep scanning
+    handledScan.current = true;
+    setScanning(false);
+    setFinding(true);
+    try {
+      setFound(await api.lookupPayee({ walletId }));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not find that wallet.');
+    } finally {
+      setFinding(false);
+    }
+  };
 
   const onFind = async () => {
     setError(null);
@@ -89,7 +124,23 @@ export default function AddBeneficiary() {
     <View style={styles.flex}>
       <ScreenHeader title="New recipient" />
       <Screen edgeTop={false}>
-        {!found ? (
+        {scanning ? (
+          <>
+            <Text style={styles.lead}>
+              Point the camera at the recipient's SecurePay QR code (Home →
+              Receive on their phone).
+            </Text>
+            <View style={styles.cameraBox}>
+              <CameraView
+                style={styles.camera}
+                facing="back"
+                barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+                onBarcodeScanned={({ data }) => void onScanned(data)}
+              />
+            </View>
+            <Button label="Cancel" variant="ghost" onPress={() => setScanning(false)} />
+          </>
+        ) : !found ? (
           <>
             <Text style={styles.lead}>
               Find someone by their email or wallet id. You can then save them as a
@@ -112,6 +163,11 @@ export default function AddBeneficiary() {
               {error ? <Text style={styles.error}>{error}</Text> : null}
             </Card>
             <Button label="Find" onPress={onFind} loading={finding} />
+            <Button
+              label="Scan QR code"
+              variant="secondary"
+              onPress={() => void openScanner()}
+            />
           </>
         ) : (
           <>
@@ -163,6 +219,13 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   form: { gap: spacing.sm },
+  cameraBox: {
+    borderRadius: radius.xl,
+    overflow: 'hidden',
+    height: 340,
+    backgroundColor: colors.textPrimary,
+  },
+  camera: { flex: 1 },
   hint: {
     fontFamily: font.family.regular,
     fontSize: font.size.sm,
