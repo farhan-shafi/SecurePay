@@ -295,6 +295,7 @@ export interface RegisterPayload {
 
 export interface P2PPayload {
   recipient_wallet_id: number;
+  sender_wallet_id?: number;
   amount: string;
   description?: string;
   idempotency_key?: string;
@@ -349,11 +350,17 @@ export const api = {
 
   getWallet: () => request<Wallet>('GET', '/api/wallets/me'),
 
-  deposit: (amount: string) =>
-    request<Wallet>('POST', '/api/wallets/me/deposit', { amount }),
+  // All of the user's wallets (one per currency), oldest first.
+  getWallets: () => request<Wallet[]>('GET', '/api/wallets/mine'),
 
-  getStatement: () =>
-    request<StatementEntry[]>('GET', '/api/wallets/me/statement'),
+  deposit: (amount: string, wallet_id?: number) =>
+    request<Wallet>('POST', '/api/wallets/me/deposit', { amount, wallet_id }),
+
+  getStatement: (walletId?: number) =>
+    request<StatementEntry[]>(
+      'GET',
+      `/api/wallets/me/statement${walletId ? `?wallet_id=${walletId}` : ''}`,
+    ),
 
   sendP2P: (body: P2PPayload) =>
     request<TransactionOut>('POST', '/api/transactions/p2p', body),
@@ -386,13 +393,15 @@ export const api = {
     biller_id: number;
     reference: string;
     amount: string;
+    sender_wallet_id?: number;
     idempotency_key?: string;
   }) => request<TransactionOut>('POST', '/api/transactions/bill', body),
 
   // Preview a (possibly cross-currency) transfer before sending.
-  getQuote: (recipientWalletId: number, amount: string) =>
+  getQuote: (recipientWalletId: number, amount: string, senderWalletId?: number) =>
     request<Quote>(
       'GET',
-      `/api/transactions/quote?recipient_wallet_id=${recipientWalletId}&amount=${encodeURIComponent(amount)}`,
+      `/api/transactions/quote?recipient_wallet_id=${recipientWalletId}&amount=${encodeURIComponent(amount)}` +
+        (senderWalletId ? `&sender_wallet_id=${senderWalletId}` : ''),
     ),
 };

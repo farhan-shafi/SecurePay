@@ -110,16 +110,13 @@ def health():
 def quote(
     recipient_wallet_id: int = Query(...),
     amount: Decimal = Query(..., gt=0),
+    sender_wallet_id: int | None = Query(default=None),
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     """Preview a transfer: how much the recipient receives in their currency.
     Lets the app show the conversion before the user commits to sending."""
-    sender = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
-    if sender is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Sender has no wallet"
-        )
+    sender = _sender_wallet(db, user_id, sender_wallet_id)
     recipient = db.get(Wallet, recipient_wallet_id)
     if recipient is None:
         raise HTTPException(
@@ -139,6 +136,20 @@ def quote(
     )
 
 
+def _sender_wallet(db: Session, user_id: int, wallet_id: int | None) -> Wallet:
+    """The wallet the user pays from: a specific one (ownership enforced) or
+    their primary (oldest)."""
+    query = select(Wallet).where(Wallet.user_id == user_id)
+    if wallet_id is not None:
+        query = query.where(Wallet.id == wallet_id)
+    wallet = db.scalars(query.order_by(Wallet.id)).first()
+    if wallet is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Sender has no wallet"
+        )
+    return wallet
+
+
 def _do_transfer(
     db: Session,
     user_id: int,
@@ -147,6 +158,7 @@ def _do_transfer(
     description: str | None,
     idempotency_key: str | None,
     transaction_type: str = "p2p",
+    sender_wallet_id: int | None = None,
 ) -> Transaction:
     """The one money-movement path. P2P transfers and bill payments both run
     through here, so locking, FX, fraud screening, idempotency and the outbox
@@ -162,11 +174,7 @@ def _do_transfer(
         if existing:
             return existing
 
-    sender = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
-    if sender is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Sender has no wallet"
-        )
+    sender = _sender_wallet(db, user_id, sender_wallet_id)
 
     recipient = db.get(Wallet, recipient_wallet_id)
     if recipient is None:
@@ -275,6 +283,7 @@ def transfer(
         payload.amount,
         payload.description,
         payload.idempotency_key,
+        sender_wallet_id=payload.sender_wallet_id,
     )
 
 
@@ -307,4 +316,5 @@ def pay_bill(
         f"{biller.name} · ref {payload.reference}",
         payload.idempotency_key,
         transaction_type="bill",
+        sender_wallet_id=payload.sender_wallet_id,
     )

@@ -37,6 +37,8 @@ class DepositRequest(BaseModel):
     # Mock top-up for development. In production a real payment processor
     # (e.g. Stripe) would fund the wallet instead.
     amount: Decimal = Field(gt=0, max_digits=15, decimal_places=2)
+    # Which of the user's wallets to fund; None = their primary wallet.
+    wallet_id: int | None = None
 
 
 class StatementEntry(BaseModel):

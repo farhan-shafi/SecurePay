@@ -77,6 +77,7 @@ export default function PayBills() {
         biller_id: biller.id,
         reference: reference.trim(),
         amount: amountNum.toFixed(2),
+        sender_wallet_id: wallet.data?.id,
         idempotency_key: newIdempotencyKey(),
       });
       setPaid(amountNum.toFixed(2));

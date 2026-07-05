@@ -23,13 +23,20 @@ from shared.security import get_current_user_id
 app = FastAPI(title="SecurePay Wallet Service")
 
 
-def _require_wallet(db: Session, user_id: int, *, lock: bool = False) -> Wallet:
+def _require_wallet(
+    db: Session, user_id: int, wallet_id: int | None = None, *, lock: bool = False
+) -> Wallet:
+    """The user's wallet: a specific one (ownership enforced) when `wallet_id`
+    is given, otherwise their primary (oldest) wallet."""
     query = select(Wallet).where(Wallet.user_id == user_id)
+    if wallet_id is not None:
+        query = query.where(Wallet.id == wallet_id)
+    query = query.order_by(Wallet.id)
     if lock:
         # SELECT ... FOR UPDATE: lock the row so concurrent deposits/transfers
         # can't read a stale balance and overwrite each other.
         query = query.with_for_update()
-    wallet = db.scalar(query)
+    wallet = db.scalars(query).first()
     if wallet is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -59,14 +66,17 @@ def create_wallet(
             detail="Please verify your email before creating a wallet.",
         )
 
-    existing = db.scalar(select(Wallet).where(Wallet.user_id == user_id))
+    # Body is optional (an empty POST defaults to USD); the schema validates the
+    # currency against the allowed set. One wallet per currency per user.
+    currency = (payload or CreateWalletRequest()).currency
+    existing = db.scalar(
+        select(Wallet).where(Wallet.user_id == user_id, Wallet.currency == currency)
+    )
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="Wallet already exists"
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"You already have a {currency} wallet",
         )
-    # Body is optional (an empty POST defaults to USD); the schema validates the
-    # currency against the allowed set.
-    currency = (payload or CreateWalletRequest()).currency
     wallet = Wallet(user_id=user_id, currency=currency)
     db.add(wallet)
     db.commit()
@@ -74,11 +84,23 @@ def create_wallet(
     return wallet
 
 
-@app.get("/me", response_model=WalletOut)
-def my_wallet(
+@app.get("/mine", response_model=list[WalletOut])
+def my_wallets(
     user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)
 ):
-    return _require_wallet(db, user_id)
+    """All of the user's wallets (one per currency), oldest first."""
+    return db.scalars(
+        select(Wallet).where(Wallet.user_id == user_id).order_by(Wallet.id)
+    ).all()
+
+
+@app.get("/me", response_model=WalletOut)
+def my_wallet(
+    wallet_id: int | None = Query(default=None),
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    return _require_wallet(db, user_id, wallet_id)
 
 
 @app.post("/me/deposit", response_model=WalletOut)
@@ -87,7 +109,7 @@ def deposit(
     user_id: int = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    wallet = _require_wallet(db, user_id, lock=True)
+    wallet = _require_wallet(db, user_id, payload.wallet_id, lock=True)
     wallet.balance += payload.amount
     db.add(
         Transaction(
@@ -106,9 +128,11 @@ def deposit(
 
 @app.get("/me/statement", response_model=list[StatementEntry])
 def statement(
-    user_id: int = Depends(get_current_user_id), db: Session = Depends(get_db)
+    wallet_id: int | None = Query(default=None),
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
 ):
-    wallet = _require_wallet(db, user_id)
+    wallet = _require_wallet(db, user_id, wallet_id)
     rows = db.scalars(
         select(Transaction)
         .where(
@@ -199,7 +223,10 @@ def lookup(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No account with that email.",
             )
-        wallet = db.scalar(select(Wallet).where(Wallet.user_id == owner.id))
+        # With multiple wallets, resolve to their primary (oldest) one.
+        wallet = db.scalars(
+            select(Wallet).where(Wallet.user_id == owner.id).order_by(Wallet.id)
+        ).first()
         if wallet is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

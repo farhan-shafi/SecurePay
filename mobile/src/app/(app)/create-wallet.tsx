@@ -13,18 +13,21 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { ApiError } from '@/lib/api';
 import { CURRENCIES } from '@/lib/currencies';
 import { useCreateWallet } from '@/lib/queries';
+import { useWalletSelection } from '@/lib/wallet-context';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
 export default function CreateWallet() {
   const router = useRouter();
   const create = useCreateWallet();
+  const { select } = useWalletSelection();
   const [selected, setSelected] = useState('USD');
   const [error, setError] = useState<string | null>(null);
 
   const onCreate = async () => {
     setError(null);
     try {
-      await create.mutateAsync(selected);
+      const w = await create.mutateAsync(selected);
+      select(w.id); // make the new wallet the active one
       router.back();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not create wallet.');
@@ -36,8 +39,9 @@ export default function CreateWallet() {
       <ScreenHeader title="Create wallet" />
       <Screen edgeTop={false}>
         <Text style={styles.lead}>
-          Choose the currency your wallet will hold. You can send to people with
-          other currencies — we'll convert at the live rate.
+          Choose the currency this wallet will hold — you can hold one wallet per
+          currency and switch between them on Home. Sending to other currencies
+          converts at the live rate.
         </Text>
 
         <View style={styles.list}>

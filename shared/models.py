@@ -40,8 +40,8 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    wallet: Mapped["Wallet"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    wallets: Mapped[list["Wallet"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
     )
 
 
@@ -49,11 +49,13 @@ class Wallet(Base):
     __tablename__ = "wallets"
     __table_args__ = (
         CheckConstraint("balance >= 0", name="balance_non_negative"),
+        # A user may hold several wallets, but only one per currency.
+        UniqueConstraint("user_id", "currency", name="uq_wallets_user_currency"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     balance: Mapped[Decimal] = mapped_column(
         Numeric(15, 2), default=Decimal("0.00"), nullable=False
@@ -64,7 +66,7 @@ class Wallet(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    user: Mapped["User"] = relationship(back_populates="wallet")
+    user: Mapped["User"] = relationship(back_populates="wallets")
 
 
 class Transaction(Base):

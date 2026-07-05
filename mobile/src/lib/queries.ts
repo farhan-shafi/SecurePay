@@ -12,7 +12,6 @@ import {
 } from '@tanstack/react-query';
 
 import {
-  ApiError,
   api,
   type Beneficiary,
   type P2PPayload,
@@ -20,6 +19,7 @@ import {
   type StatementEntry,
   type Wallet,
 } from './api';
+import { useWalletSelection } from './wallet-context';
 
 export const keys = {
   me: ['me'] as const,
@@ -77,28 +77,32 @@ export function useChangeEmailConfirm() {
   });
 }
 
+/** All of the user's wallets (one per currency), oldest first. */
+export function useWallets() {
+  return useQuery<Wallet[]>({ queryKey: keys.wallet, queryFn: api.getWallets });
+}
+
 /**
- * The wallet, or `null` if the user hasn't created one yet (the backend 404s on
- * /wallets/me until then — we treat that as "no wallet", not an error).
+ * The ACTIVE wallet (the one the Home switcher selected; defaults to the
+ * primary/oldest). Returns the wallets query with `data` narrowed to that one
+ * wallet — `data` is undefined until the user has created any wallet — so the
+ * many screens written against a single wallet keep working unchanged.
  */
 export function useWallet() {
-  return useQuery<Wallet | null>({
-    queryKey: keys.wallet,
-    queryFn: async () => {
-      try {
-        return await api.getWallet();
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      }
-    },
-  });
+  const q = useWallets();
+  const { selectedId } = useWalletSelection();
+  const list = q.data ?? [];
+  const data = list.find((w) => w.id === selectedId) ?? list[0];
+  return { ...q, data };
 }
 
 export function useStatement() {
+  const wallet = useWallet();
+  const walletId = wallet.data?.id;
   return useQuery<StatementEntry[]>({
-    queryKey: keys.statement,
-    queryFn: api.getStatement,
+    queryKey: [...keys.statement, walletId],
+    queryFn: () => api.getStatement(walletId),
+    enabled: walletId != null,
   });
 }
 
@@ -106,7 +110,7 @@ export function useCreateWallet() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (currency: string) => api.createWallet(currency),
-    onSuccess: (wallet) => qc.setQueryData(keys.wallet, wallet),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.wallet }),
   });
 }
 
@@ -136,10 +140,12 @@ export function useDeleteBeneficiary() {
 
 export function useDeposit() {
   const qc = useQueryClient();
+  const wallet = useWallet();
+  const walletId = wallet.data?.id;
   return useMutation({
-    mutationFn: (amount: string) => api.deposit(amount),
-    onSuccess: (wallet) => {
-      qc.setQueryData(keys.wallet, wallet);
+    mutationFn: (amount: string) => api.deposit(amount, walletId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.wallet });
       qc.invalidateQueries({ queryKey: keys.statement });
     },
   });
@@ -148,9 +154,11 @@ export function useDeposit() {
 /** Live preview of a (possibly cross-currency) transfer. `enabled` should be
  *  false until the amount is a valid positive number. */
 export function useQuote(recipientWalletId: number, amount: string, enabled: boolean) {
+  const wallet = useWallet();
+  const senderId = wallet.data?.id;
   return useQuery<Quote>({
-    queryKey: ['quote', recipientWalletId, amount],
-    queryFn: () => api.getQuote(recipientWalletId, amount),
+    queryKey: ['quote', recipientWalletId, amount, senderId],
+    queryFn: () => api.getQuote(recipientWalletId, amount, senderId),
     enabled,
   });
 }
@@ -177,6 +185,7 @@ export function usePayBill() {
       biller_id: number;
       reference: string;
       amount: string;
+      sender_wallet_id?: number;
       idempotency_key?: string;
     }) => api.payBill(body),
     onSuccess: () => {

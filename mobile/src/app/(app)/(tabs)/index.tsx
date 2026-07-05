@@ -24,15 +24,19 @@ import { DepositSheet } from '@/components/DepositSheet';
 import { Screen } from '@/components/Screen';
 import { TransactionRow } from '@/components/TransactionRow';
 import { initials } from '@/lib/format';
-import { useProfile, useStatement, useWallet } from '@/lib/queries';
+import { currencyMeta } from '@/lib/currencies';
+import { useProfile, useStatement, useWallet, useWallets } from '@/lib/queries';
+import { useWalletSelection } from '@/lib/wallet-context';
 import { colors, font, radius, spacing } from '@/theme/tokens';
 
 export default function Home() {
   const router = useRouter();
 
   const profile = useProfile();
+  const wallets = useWallets();
   const wallet = useWallet();
   const statement = useStatement();
+  const { select } = useWalletSelection();
 
   const [depositOpen, setDepositOpen] = useState(false);
 
@@ -81,6 +85,35 @@ export default function Home() {
           </View>
         </View>
       </Pressable>
+
+      {/* Wallet switcher — one chip per currency, plus "add" */}
+      {(wallets.data?.length ?? 0) > 0 ? (
+        <View style={styles.switcher}>
+          {(wallets.data ?? []).map((w) => {
+            const active = w.id === wallet.data?.id;
+            return (
+              <Pressable
+                key={w.id}
+                style={[styles.chip, active && styles.chipActive]}
+                onPress={() => select(w.id)}
+              >
+                <Text style={[styles.chipText, active && styles.chipTextActive]}>
+                  {currencyMeta(w.currency).flag} {w.currency}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {(wallets.data?.length ?? 0) < 4 ? (
+            <Pressable
+              style={styles.chip}
+              onPress={() => router.push('/(app)/create-wallet')}
+              accessibilityLabel="Add a wallet"
+            >
+              <Ionicons name="add" size={16} color={colors.brand} />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Balance / create-wallet */}
       {wallet.isLoading ? (
@@ -227,6 +260,24 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   headerIcons: { flexDirection: 'row', gap: spacing.sm },
+  switcher: { flexDirection: 'row', gap: spacing.sm, flexWrap: 'wrap' },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    height: 34,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  chipActive: { backgroundColor: colors.brand, borderColor: colors.brand },
+  chipText: {
+    fontFamily: font.family.semibold,
+    fontSize: font.size.sm,
+    color: colors.textSecondary,
+  },
+  chipTextActive: { color: colors.onBrand },
   iconBtn: {
     width: 40,
     height: 40,

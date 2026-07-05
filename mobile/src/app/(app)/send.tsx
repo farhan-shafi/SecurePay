@@ -96,6 +96,7 @@ export default function Send() {
     try {
       const tx = await send.mutateAsync({
         recipient_wallet_id: recipientWalletId,
+        sender_wallet_id: wallet.data?.id,
         amount: amountNum.toFixed(2),
         description: note.trim() || undefined,
         idempotency_key: newIdempotencyKey(),

@@ -6,6 +6,8 @@ from pydantic import BaseModel, Field
 
 class P2PRequest(BaseModel):
     recipient_wallet_id: int
+    # Which of the sender's wallets to pay from; None = their primary wallet.
+    sender_wallet_id: int | None = None
     amount: Decimal = Field(gt=0, max_digits=15, decimal_places=2)
     description: str | None = Field(default=None, max_length=500)
     # Optional but recommended: a unique key (e.g. a UUID) so that retrying the
@@ -51,6 +53,7 @@ class BillerOut(BaseModel):
 
 class BillRequest(BaseModel):
     biller_id: int
+    sender_wallet_id: int | None = None
     # The consumer/account number printed on the bill.
     reference: str = Field(min_length=3, max_length=60)
     amount: Decimal = Field(gt=0, max_digits=15, decimal_places=2)

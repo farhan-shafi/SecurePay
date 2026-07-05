@@ -21,6 +21,7 @@ import { useEffect } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider } from '@/lib/auth';
+import { WalletSelectionProvider } from '@/lib/wallet-context';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -48,8 +49,10 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <StatusBar style="dark" />
-          <Stack screenOptions={{ headerShown: false }} />
+          <WalletSelectionProvider>
+            <StatusBar style="dark" />
+            <Stack screenOptions={{ headerShown: false }} />
+          </WalletSelectionProvider>
         </AuthProvider>
       </QueryClientProvider>
     </SafeAreaProvider>
