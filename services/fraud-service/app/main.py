@@ -20,7 +20,8 @@ from sqlalchemy.orm import Session
 from app.schemas import AnalyzeRequest, AnalyzeResponse, FraudLogOut
 from shared.config import settings
 from shared.database import get_db
-from shared.models import FraudLog, Transaction
+from shared.models import FraudLog, Transaction, Wallet
+from shared.security import get_current_user_id
 
 # Each rule that fires adds its score. Keeping the numbers here (rather than
 # scattered through the code) makes the policy easy to read and tune.
@@ -33,6 +34,15 @@ AMOUNT_ANOMALY_SCORE = 25
 
 NEW_RECIPIENT_MIN_AMOUNT = Decimal("500.00")  # large first-time payment
 NEW_RECIPIENT_SCORE = 20
+
+# Statistical anomaly (ML-lite): how many standard deviations above the wallet's
+# own historical mean an amount must be to look anomalous. Rule 2 catches "more
+# than 2x the average"; this catches "wildly outside this wallet's NORMAL
+# variation", which adapts to each user (a z-score is the first feature a real
+# ML fraud model would use — this is the stepping stone to that model).
+ZSCORE_THRESHOLD = 3.0
+ZSCORE_MIN_HISTORY = 5  # need enough transfers for mean/stddev to mean anything
+ZSCORE_SCORE = 15
 
 
 app = FastAPI(title="SecurePay Fraud Service")
@@ -92,7 +102,26 @@ def _score_transfer(db: Session, req: AnalyzeRequest) -> tuple[float, list[str]]
         score += AMOUNT_ANOMALY_SCORE
         signals.append("unusual_amount")
 
-    # Rule 3 — large payment to a never-seen recipient.
+    # Rule 3 — statistical anomaly: z-score of the amount against this wallet's
+    # own history. Uses population stddev; skipped until there's enough history.
+    stats = db.execute(
+        select(
+            func.count(Transaction.amount),
+            func.avg(Transaction.amount),
+            func.stddev_pop(Transaction.amount),
+        ).where(
+            Transaction.wallet_id == req.wallet_id,
+            Transaction.transaction_type == "p2p",
+        )
+    ).one()
+    n, mean, std = stats[0] or 0, stats[1], stats[2]
+    if n >= ZSCORE_MIN_HISTORY and mean is not None and std and std > 0:
+        z = float((Decimal(str(req.amount)) - mean) / std)
+        if z > ZSCORE_THRESHOLD:
+            score += ZSCORE_SCORE
+            signals.append("amount_zscore_anomaly")
+
+    # Rule 4 — large payment to a never-seen recipient.
     seen_before = db.scalar(
         select(func.count())
         .select_from(Transaction)
@@ -152,3 +181,20 @@ def logs(
     if wallet_id is not None:
         query = query.where(FraudLog.wallet_id == wallet_id)
     return db.scalars(query).all()
+
+
+@app.get("/me/logs", response_model=list[FraudLogOut])
+def my_logs(
+    user_id: int = Depends(get_current_user_id),
+    limit: int = Query(default=50, le=200),
+    db: Session = Depends(get_db),
+):
+    """The authenticated user's own fraud events (for the app's security
+    center). This is the only fraud endpoint the gateway exposes publicly."""
+    wallet_ids = select(Wallet.id).where(Wallet.user_id == user_id)
+    return db.scalars(
+        select(FraudLog)
+        .where(FraudLog.wallet_id.in_(wallet_ids))
+        .order_by(FraudLog.created_at.desc())
+        .limit(limit)
+    ).all()

@@ -22,12 +22,11 @@ class Settings(BaseSettings):
     # JWT / auth
     jwt_secret: str = "dev-secret-change-me-to-a-long-random-string"
     jwt_algorithm: str = "HS256"
-    # How long a login lasts. In production this should be SHORT (e.g. 15 min)
-    # and paired with a refresh-token flow that silently issues a new access
-    # token. We don't have that flow yet, so for development/demos we use a long
-    # access token (7 days) so you're not logged out mid-session. Lower it (or
-    # set ACCESS_TOKEN_TTL_MINUTES in the env) once refresh tokens are added.
-    access_token_ttl_minutes: int = 60 * 24 * 7  # 7 days
+    # Access tokens are short-lived; the app silently exchanges the refresh
+    # token (below) for a new pair when a request comes back 401, so the user
+    # stays logged in for up to refresh_token_ttl_days without long-lived
+    # access tokens floating around.
+    access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 7
 
     # Internal service URLs (used by the API gateway to route requests)

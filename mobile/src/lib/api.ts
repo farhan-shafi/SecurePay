@@ -13,18 +13,61 @@
 import { API_BASE_URL } from './config';
 
 // --- Token handling ---------------------------------------------------------
-// The auth layer sets this after login; request() reads it for every call.
+// The auth layer sets these after login; request() reads them for every call.
+// Access tokens are short-lived (15 min): when one expires we silently exchange
+// the refresh token for a new pair and retry, so the user never notices.
 let authToken: string | null = null;
+let refreshToken: string | null = null;
 export function setAuthToken(token: string | null) {
   authToken = token;
 }
+export function setRefreshToken(token: string | null) {
+  refreshToken = token;
+}
 
-// Called when an authenticated request comes back 401 (our token is invalid or
-// expired). The auth layer registers a handler that signs the user out, so a
-// stale token can never leave the app stuck on an empty logged-in screen.
+// The auth layer registers this to persist a refreshed token pair.
+let onTokensRefreshed: ((tokens: TokenResponse) => void) | null = null;
+export function setOnTokensRefreshed(cb: ((tokens: TokenResponse) => void) | null) {
+  onTokensRefreshed = cb;
+}
+
+// Called when the session is truly dead (refresh failed too). The auth layer
+// signs the user out, so a stale token can never leave the app stuck.
 let onUnauthorized: (() => void) | null = null;
 export function setOnUnauthorized(cb: (() => void) | null) {
   onUnauthorized = cb;
+}
+
+// Single-flight: if several requests hit 401 at once, only one refresh runs.
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  if (!refreshToken) return false;
+  refreshInFlight ??= (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/users/refresh`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Bypass-Tunnel-Reminder': 'true',
+        },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!res.ok) return false;
+      const tokens = (await res.json()) as TokenResponse;
+      authToken = tokens.access_token;
+      refreshToken = tokens.refresh_token;
+      onTokensRefreshed?.(tokens);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setTimeout(() => {
+        refreshInFlight = null;
+      }, 0);
+    }
+  })();
+  return refreshInFlight;
 }
 
 // --- Error type -------------------------------------------------------------
@@ -41,7 +84,12 @@ export class ApiError extends Error {
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
-async function request<T>(method: Method, path: string, body?: unknown): Promise<T> {
+async function request<T>(
+  method: Method,
+  path: string,
+  body?: unknown,
+  isRetry = false,
+): Promise<T> {
   let res: Response;
   // Abort the request if it hangs, so the UI fails fast instead of spinning
   // forever when the backend isn't reachable (e.g. phone not on the LAN).
@@ -87,10 +135,15 @@ async function request<T>(method: Method, path: string, body?: unknown): Promise
   }
 
   if (!res.ok) {
-    // A 401 on a request we *sent a token with* means that token is no longer
-    // good — sign the user out so they land back on login instead of a broken,
-    // accountless screen.
-    if (res.status === 401 && authToken) {
+    // A 401 on a request we *sent a token with* usually just means the access
+    // token expired. Silently refresh and retry once; only if THAT fails is the
+    // session truly dead, and we sign the user out.
+    if (res.status === 401 && authToken && !isRetry) {
+      if (await tryRefresh()) {
+        return request<T>(method, path, body, true);
+      }
+      onUnauthorized?.();
+    } else if (res.status === 401 && authToken && isRetry) {
       onUnauthorized?.();
     }
     const detail = (data as { detail?: unknown })?.detail ?? data;
@@ -200,6 +253,31 @@ export interface EmailChangeStart {
   dev_code: string | null;
 }
 
+export interface ForgotPasswordOut {
+  message: string;
+  dev_code: string | null;
+}
+
+export interface NotificationItem {
+  id: number;
+  channel: string;
+  message: string;
+  transaction_id: number | null;
+  status: string;
+  created_at: string;
+}
+
+export interface FraudLogItem {
+  id: number;
+  transaction_id: number | null;
+  wallet_id: number;
+  fraud_score: string;
+  risk_level: string;
+  detected_signals: string[];
+  action_taken: string;
+  created_at: string;
+}
+
 export interface RegisterPayload {
   email: string;
   phone_number: string;
@@ -224,6 +302,24 @@ export const api = {
     request<TokenResponse>('POST', '/api/users/login', { email, password }),
 
   me: () => request<User>('GET', '/api/users/me'),
+
+  // Forgot / reset password (code emailed to the account address)
+  forgotPassword: (email: string) =>
+    request<ForgotPasswordOut>('POST', '/api/users/password/forgot', { email }),
+
+  resetPassword: (email: string, code: string, new_password: string) =>
+    request<ForgotPasswordOut>('POST', '/api/users/password/reset', {
+      email,
+      code,
+      new_password,
+    }),
+
+  // Notification feed (same rows the email worker records)
+  getNotifications: () =>
+    request<NotificationItem[]>('GET', '/api/users/me/notifications'),
+
+  // The user's own fraud events (security center)
+  getFraudLogs: () => request<FraudLogItem[]>('GET', '/api/fraud/me/logs'),
 
   // Identity verification (phone OTP)
   startVerification: () =>

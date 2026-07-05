@@ -4,15 +4,20 @@ identity-verification (mock KYC) flow."""
 import random
 
 import redis
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.schemas import (
     EmailChangeStartOut,
     EmailChangeStartRequest,
+    ForgotPasswordOut,
+    ForgotPasswordRequest,
     LoginRequest,
+    NotificationOut,
+    RefreshRequest,
     RegisterRequest,
+    ResetPasswordRequest,
     TokenResponse,
     UserOut,
     VerifyConfirmRequest,
@@ -21,10 +26,11 @@ from app.schemas import (
 from shared.config import settings
 from shared.database import get_db
 from shared.email import send_email
-from shared.models import User
+from shared.models import Notification, User
 from shared.security import (
     create_access_token,
     create_refresh_token,
+    decode_token,
     get_current_user_id,
     hash_password,
     verify_password,
@@ -47,6 +53,13 @@ EMAIL_CHANGE_TTL_SECONDS = 600  # 10 minutes
 
 def _email_change_key(user_id: int) -> str:
     return f"email_change:{user_id}"
+
+
+PASSWORD_RESET_TTL_SECONDS = 600  # 10 minutes
+
+
+def _pw_reset_key(email: str) -> str:
+    return f"pw_reset:{email}"
 
 
 def _mask_email(email: str) -> str:
@@ -88,6 +101,29 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return user
+
+
+@app.post("/refresh", response_model=TokenResponse)
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
+    """Exchange a valid refresh token for a fresh access + refresh pair.
+
+    This is what lets the access token stay short-lived (15 min): the app calls
+    this silently when a request comes back 401, instead of logging the user out.
+    """
+    claims = decode_token(payload.refresh_token)
+    if claims.get("type") != "refresh":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="A refresh token is required"
+        )
+    user = db.get(User, int(claims["sub"]))
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Account no longer exists"
+        )
+    return TokenResponse(
+        access_token=create_access_token(user.id, user.email),
+        refresh_token=create_refresh_token(user.id),
+    )
 
 
 @app.post("/login", response_model=TokenResponse)
@@ -192,6 +228,72 @@ def verify_confirm(
     db.refresh(user)
     _redis.delete(_otp_key(user_id))
     return user
+
+
+@app.get("/me/notifications", response_model=list[NotificationOut])
+def my_notifications(
+    user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+    limit: int = Query(default=50, le=200),
+):
+    """The user's notification feed — the same rows the email worker records."""
+    return db.scalars(
+        select(Notification)
+        .where(Notification.user_id == user_id)
+        .order_by(Notification.created_at.desc())
+        .limit(limit)
+    ).all()
+
+
+@app.post("/password/forgot", response_model=ForgotPasswordOut)
+def forgot_password(payload: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Email a reset code. The response is identical whether or not the account
+    exists, so this can't be used to probe which emails are registered."""
+    email = payload.email.strip().lower()
+    generic = ForgotPasswordOut(
+        message="If that email has an account, we've sent it a reset code."
+    )
+    user = db.scalar(select(User).where(User.email == email))
+    if user is None:
+        return generic
+
+    code = f"{random.randint(0, 999999):06d}"
+    _redis.setex(_pw_reset_key(email), PASSWORD_RESET_TTL_SECONDS, code)
+    html = (
+        f"<p>Hi {user.first_name},</p>"
+        f"<p>Use this code to reset your SecurePay password:</p>"
+        f"<p style='font-size:30px;font-weight:bold;letter-spacing:4px'>{code}</p>"
+        f"<p>It expires in 10 minutes. If you didn't request this, ignore this email.</p>"
+    )
+    text = (
+        f"Hi {user.first_name},\n\nYour SecurePay password reset code is {code}. "
+        f"It expires in 10 minutes.\nIf you didn't request this, ignore this email."
+    )
+    email_sent = send_email(email, "Reset your SecurePay password", html,
+                            to_name=user.first_name, text=text)
+    print(f"[PW-RESET] code for {email}: {code} (email_sent={email_sent})")
+    if not email_sent:
+        generic.dev_code = code
+    return generic
+
+
+@app.post("/password/reset", response_model=ForgotPasswordOut)
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)):
+    """Set a new password if the emailed code matches."""
+    email = payload.email.strip().lower()
+    stored = _redis.get(_pw_reset_key(email))
+    if stored is None or payload.code.strip() != stored:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect or expired code. Request a new one.",
+        )
+    user = db.scalar(select(User).where(User.email == email))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user.password_hash = hash_password(payload.new_password)
+    db.commit()
+    _redis.delete(_pw_reset_key(email))
+    return ForgotPasswordOut(message="Password updated. You can log in now.")
 
 
 @app.post("/me/email/change/start", response_model=EmailChangeStartOut)

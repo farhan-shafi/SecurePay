@@ -69,6 +69,10 @@ export default function Login() {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <Button label="Sign in" onPress={onSubmit} loading={busy} style={styles.cta} />
+
+        <Link href="/(auth)/forgot-password" style={[styles.link, styles.forgot]}>
+          Forgot password?
+        </Link>
       </View>
 
       <View style={styles.footer}>
@@ -116,4 +120,5 @@ const styles = StyleSheet.create({
     fontSize: font.size.md,
     color: colors.brand,
   },
+  forgot: { textAlign: 'center', marginTop: spacing.sm },
 });

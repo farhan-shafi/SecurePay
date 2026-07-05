@@ -67,8 +67,18 @@ export default function Home() {
             </Text>
           </View>
         </View>
-        <View style={styles.iconBtn}>
-          <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
+        <View style={styles.headerIcons}>
+          <Pressable
+            onPress={() => router.push('/(app)/notifications')}
+            hitSlop={8}
+            style={styles.iconBtn}
+            accessibilityLabel="Notifications"
+          >
+            <Ionicons name="notifications-outline" size={20} color={colors.textSecondary} />
+          </Pressable>
+          <View style={styles.iconBtn}>
+            <Ionicons name="settings-outline" size={20} color={colors.textSecondary} />
+          </View>
         </View>
       </Pressable>
 
@@ -211,6 +221,7 @@ const styles = StyleSheet.create({
     fontSize: font.size.xl,
     color: colors.textPrimary,
   },
+  headerIcons: { flexDirection: 'row', gap: spacing.sm },
   iconBtn: {
     width: 40,
     height: 40,

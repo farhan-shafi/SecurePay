@@ -54,6 +54,15 @@ export default function Settings() {
                 <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
               </Pressable>
               <Divider />
+              <Pressable
+                style={styles.row}
+                onPress={() => router.push('/(app)/security')}
+              >
+                <Ionicons name="shield-half-outline" size={20} color={colors.textSecondary} />
+                <Text style={[styles.rowLabel, styles.grow]}>Security & fraud events</Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </Pressable>
+              <Divider />
               <DetailRow icon="call-outline" label="Phone" value={u.phone_number} />
               <Divider />
               {/* Identity — tappable "Verify now" when not yet verified */}

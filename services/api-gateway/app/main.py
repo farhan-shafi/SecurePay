@@ -22,7 +22,13 @@ SERVICE_ROUTES = {
     "users": settings.user_service_url,
     "wallets": settings.wallet_service_url,
     "transactions": settings.transaction_service_url,
+    "fraud": settings.fraud_service_url,
 }
+
+# For some services only part of the API is public. The fraud service's
+# /analyze and /logs are internal (called service-to-service, no user auth), so
+# the gateway only forwards its authenticated "me/..." endpoints.
+PUBLIC_PATH_PREFIXES = {"fraud": ("me/",)}
 
 # Hop-by-hop headers we must not forward verbatim to the upstream service.
 _SKIP_REQUEST_HEADERS = {"host", "content-length"}
@@ -70,6 +76,12 @@ async def proxy(service: str, path: str, request: Request):
     if base_url is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Unknown service '{service}'"
+        )
+
+    allowed = PUBLIC_PATH_PREFIXES.get(service)
+    if allowed is not None and not path.startswith(allowed):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found"
         )
 
     await _enforce_rate_limit(request)

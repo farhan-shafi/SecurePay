@@ -26,6 +26,8 @@ export const keys = {
   wallet: ['wallet'] as const,
   statement: ['statement'] as const,
   beneficiaries: ['beneficiaries'] as const,
+  notifications: ['notifications'] as const,
+  fraudLogs: ['fraudLogs'] as const,
 };
 
 export function useProfile() {
@@ -41,6 +43,25 @@ export function useConfirmVerification() {
   return useMutation({
     mutationFn: (code: string) => api.confirmVerification(code),
     onSuccess: (user) => qc.setQueryData(keys.me, user),
+  });
+}
+
+export function useNotifications() {
+  return useQuery({ queryKey: keys.notifications, queryFn: api.getNotifications });
+}
+
+export function useFraudLogs() {
+  return useQuery({ queryKey: keys.fraudLogs, queryFn: api.getFraudLogs });
+}
+
+export function useForgotPassword() {
+  return useMutation({ mutationFn: (email: string) => api.forgotPassword(email) });
+}
+
+export function useResetPassword() {
+  return useMutation({
+    mutationFn: (v: { email: string; code: string; password: string }) =>
+      api.resetPassword(v.email, v.code, v.password),
   });
 }
 

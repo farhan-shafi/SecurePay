@@ -27,11 +27,15 @@ import {
 import {
   api,
   setAuthToken,
+  setOnTokensRefreshed,
   setOnUnauthorized,
+  setRefreshToken,
   type RegisterPayload,
+  type TokenResponse,
 } from './api';
 
 const TOKEN_KEY = 'securepay.access_token';
+const REFRESH_KEY = 'securepay.refresh_token';
 
 interface AuthValue {
   token: string | null;
@@ -53,9 +57,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     (async () => {
       try {
-        const stored = await SecureStore.getItemAsync(TOKEN_KEY);
+        const [stored, storedRefresh] = await Promise.all([
+          SecureStore.getItemAsync(TOKEN_KEY),
+          SecureStore.getItemAsync(REFRESH_KEY),
+        ]);
         if (stored) {
           setAuthToken(stored);
+          setRefreshToken(storedRefresh);
           setToken(stored);
         }
       } finally {
@@ -64,13 +72,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  const persistToken = useCallback(
-    async (value: string) => {
+  const persistTokens = useCallback(
+    async (tokens: TokenResponse) => {
       // Drop any previous user's cached data before this account's screens mount.
       queryClient.clear();
-      await SecureStore.setItemAsync(TOKEN_KEY, value);
-      setAuthToken(value);
-      setToken(value);
+      await Promise.all([
+        SecureStore.setItemAsync(TOKEN_KEY, tokens.access_token),
+        SecureStore.setItemAsync(REFRESH_KEY, tokens.refresh_token),
+      ]);
+      setAuthToken(tokens.access_token);
+      setRefreshToken(tokens.refresh_token);
+      setToken(tokens.access_token);
     },
     [queryClient],
   );
@@ -78,9 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(
     async (email: string, password: string) => {
       const res = await api.login(email, password);
-      await persistToken(res.access_token);
+      await persistTokens(res);
     },
-    [persistToken],
+    [persistTokens],
   );
 
   const signUp = useCallback(
@@ -88,19 +100,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await api.register(payload);
       // Registration doesn't return a token, so log in straight away.
       const res = await api.login(payload.email, payload.password);
-      await persistToken(res.access_token);
+      await persistTokens(res);
     },
-    [persistToken],
+    [persistTokens],
   );
 
   const signOut = useCallback(async () => {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await Promise.all([
+      SecureStore.deleteItemAsync(TOKEN_KEY),
+      SecureStore.deleteItemAsync(REFRESH_KEY),
+    ]);
     setAuthToken(null);
+    setRefreshToken(null);
     setToken(null);
     queryClient.clear();
   }, [queryClient]);
 
-  // If any authenticated request gets a 401 (stale/expired token), sign out.
+  // When the api client silently refreshes an expired access token, persist the
+  // new pair so the session survives an app restart too.
+  useEffect(() => {
+    setOnTokensRefreshed((tokens) => {
+      void SecureStore.setItemAsync(TOKEN_KEY, tokens.access_token);
+      void SecureStore.setItemAsync(REFRESH_KEY, tokens.refresh_token);
+    });
+    return () => setOnTokensRefreshed(null);
+  }, []);
+
+  // Only reached when a 401 could NOT be fixed by a silent refresh — the
+  // session is truly dead, so sign out.
   useEffect(() => {
     setOnUnauthorized(() => {
       void signOut();
