@@ -83,9 +83,6 @@ python3 scripts/smoke_test.py
 To stop: `Ctrl+C`, then `docker compose down`.
 To also wipe the database: `docker compose down -v`.
 
-If you prefer shortcuts, a `Makefile` is included: `make up`, `make down`,
-`make logs`, `make test`, `make psql`.
-
 ---
 
 ## Try it by hand (curl)
